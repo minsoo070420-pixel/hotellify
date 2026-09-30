@@ -399,6 +399,15 @@ function hotelSubtitle(h) {
   return [h.city, h.country].filter(Boolean).join(", ");
 }
 
+// Links out to Google Hotels' live price comparison (Booking.com,
+// Expedia, Hotels.com, etc. all in one place, cheapest first) rather
+// than showing a made-up discount — there's no real pricing API wired
+// into this static app, so a fabricated "% off" would just be a guess.
+function dealsUrl(h) {
+  const query = encodeURIComponent([h.name, h.city, h.country].filter(Boolean).join(" "));
+  return `https://www.google.com/travel/hotels?q=${query}`;
+}
+
 function truncate(s, max) {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
@@ -501,6 +510,7 @@ function renderWantToGo() {
           <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}</div>
         </div>
         <div class="row-actions">
+          <a class="icon-btn" href="${dealsUrl(h)}" target="_blank" rel="noopener" title="Find deals on Google Hotels">💰</a>
           <button class="pill-btn" data-visit="${h.id}">I've stayed here</button>
           <button class="icon-btn" data-remove-want="${h.id}" title="Remove">✕</button>
         </div>
@@ -528,6 +538,7 @@ function renderAddView() {
           <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}${favg !== null ? ` · 👥 Friends avg ${favg.toFixed(1)}` : ""}</div>
         </div>
         <div class="row-actions">
+          <a class="icon-btn" href="${dealsUrl(h)}" target="_blank" rel="noopener" title="Find deals on Google Hotels">💰</a>
           <button class="pill-btn ghost" data-want="${h.id}">Want to Go</button>
           <button class="pill-btn" data-rank="${h.id}">I've stayed here</button>
         </div>
@@ -591,6 +602,7 @@ function renderDiscover() {
         </div>
         <div class="row-actions">
           <span class="badge" style="background:${badgeColor}">${score}%</span>
+          <a class="icon-btn" href="${dealsUrl(hotel)}" target="_blank" rel="noopener" title="Find deals on Google Hotels">💰</a>
           <button class="pill-btn ghost" data-want="${hotel.id}">Want to Go</button>
           <button class="pill-btn" data-rank="${hotel.id}">I've stayed here</button>
         </div>
