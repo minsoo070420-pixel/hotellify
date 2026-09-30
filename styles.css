@@ -458,3 +458,68 @@ main {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* Notes & review photos */
+
+.rank-note {
+  color: var(--ink);
+  font-size: 13px;
+  font-style: italic;
+  margin-top: 6px;
+  opacity: 0.85;
+}
+
+.notes-textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: 14px;
+}
+
+.review-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.review-gallery:empty {
+  display: none;
+}
+
+.review-photo {
+  position: relative;
+  width: 88px;
+  height: 88px;
+}
+
+.review-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+.review-photo-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--ink);
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  padding: 0;
+}
+.review-photo-remove:hover { color: white; }

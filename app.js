@@ -307,17 +307,25 @@ function amenityVerdictText(category, score) {
   return `The ${lower} photo looks dim or sparse — could mean dated or limited facilities, though lighting alone isn't definitive.`;
 }
 
+function downscaleImageToDataUrl(img, maxDim = 320, quality = 0.7) {
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function fileToPhotoDataUrl(file) {
+  const rawDataUrl = await readFileAsDataUrl(file);
+  const img = await loadImage(rawDataUrl);
+  return downscaleImageToDataUrl(img);
+}
+
 async function analyzePhoto(file, category) {
   const rawDataUrl = await readFileAsDataUrl(file);
   const img = await loadImage(rawDataUrl);
-
-  const storeCanvas = document.createElement("canvas");
-  const maxDim = 320;
-  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-  storeCanvas.width = Math.max(1, Math.round(img.width * scale));
-  storeCanvas.height = Math.max(1, Math.round(img.height * scale));
-  storeCanvas.getContext("2d").drawImage(img, 0, 0, storeCanvas.width, storeCanvas.height);
-  const dataUrl = storeCanvas.toDataURL("image/jpeg", 0.7);
+  const dataUrl = downscaleImageToDataUrl(img);
 
   const size = 48;
   const sampleCanvas = document.createElement("canvas");
@@ -384,6 +392,10 @@ function escapeHtml(s) {
 
 function hotelSubtitle(h) {
   return [h.city, h.country].filter(Boolean).join(", ");
+}
+
+function truncate(s, max) {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 function render() {
@@ -454,10 +466,11 @@ function renderRankings() {
           <div class="rank-name">${escapeHtml(h.name)}</div>
           <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}</div>
           ${worthTag}
+          ${h.notes ? `<div class="rank-note">"${escapeHtml(truncate(h.notes, 90))}"</div>` : ""}
         </div>
         <div class="row-actions">
           <span class="badge" style="background:${meta.color}">${h.score.toFixed(1)}</span>
-          <button class="icon-btn" data-amenities="${h.id}" title="Amenities">📷</button>
+          <button class="icon-btn" data-amenities="${h.id}" title="Notes, photos & amenities">📝</button>
           <button class="icon-btn" data-remove-ranked="${h.id}" title="Remove">✕</button>
         </div>
       </li>`;
@@ -793,6 +806,17 @@ function renderAmenities() {
   if (!h) return `<div class="empty">Hotel not found.</div>`;
   const photos = h.photos || {};
   const report = h.amenityReport || {};
+  const reviewPhotos = h.reviewPhotos || [];
+
+  const reviewGallery = reviewPhotos
+    .map(
+      (src, i) => `
+      <div class="review-photo">
+        <img src="${src}" alt="Review photo ${i + 1}" />
+        <button class="icon-btn review-photo-remove" data-remove-review-photo="${i}" title="Remove">✕</button>
+      </div>`
+    )
+    .join("");
 
   const cards = AMENITY_CATEGORIES.map((cat) => {
     const photo = photos[cat];
@@ -819,7 +843,18 @@ function renderAmenities() {
 
   return `
     <button class="icon-btn back-btn" data-tab="rankings">← My Rankings</button>
-    <h2>${escapeHtml(h.name)} — Amenities</h2>
+    <h2>${escapeHtml(h.name)}</h2>
+
+    <h3 class="section-title" style="margin-top:0">Your Review</h3>
+    <textarea id="notes-input" class="notes-textarea" placeholder="What was the stay like? Any standout details...">${escapeHtml(h.notes || "")}</textarea>
+
+    <div class="review-gallery">${reviewGallery}</div>
+    <label class="pill-btn ghost file-btn">
+      Add Photos
+      <input type="file" accept="image/*" id="review-photo-input" multiple hidden />
+    </label>
+
+    <h3 class="section-title">Amenities</h3>
     <p class="rank-sub">Beta: a quick photo brightness/detail heuristic as a rough stand-in for equipment quality — not real object recognition.</p>
     <div class="amenity-grid">${cards}</div>
   `;
@@ -913,6 +948,40 @@ function bindGlobalEvents() {
       h.photos[cat] = result.dataUrl;
       h.amenityReport = h.amenityReport || {};
       h.amenityReport[cat] = { score: result.score, text: result.text };
+      saveState();
+      render();
+    });
+  });
+
+  const notesInput = document.getElementById("notes-input");
+  if (notesInput) {
+    notesInput.addEventListener("input", (e) => {
+      const h = state.ranked.find((r) => r.id === viewingRankedId);
+      if (!h) return;
+      h.notes = e.target.value;
+      saveState();
+    });
+  }
+  const reviewPhotoInput = document.getElementById("review-photo-input");
+  if (reviewPhotoInput) {
+    reviewPhotoInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      const h = state.ranked.find((r) => r.id === viewingRankedId);
+      if (!h) return;
+      h.reviewPhotos = h.reviewPhotos || [];
+      for (const file of files) {
+        h.reviewPhotos.push(await fileToPhotoDataUrl(file));
+      }
+      saveState();
+      render();
+    });
+  }
+  root.querySelectorAll("[data-remove-review-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const h = state.ranked.find((r) => r.id === viewingRankedId);
+      if (!h || !h.reviewPhotos) return;
+      h.reviewPhotos.splice(Number(btn.dataset.removeReviewPhoto), 1);
       saveState();
       render();
     });
