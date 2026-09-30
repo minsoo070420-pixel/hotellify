@@ -43,13 +43,36 @@ body {
 .profile-btn {
   border: none;
   cursor: pointer;
-  font-size: 18px;
+  color: var(--muted);
 }
 
 .profile-btn-active {
   border-color: var(--ink);
   background: var(--ink);
+  color: white;
 }
+
+.profile-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.profile-heading-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.profile-heading-icon svg { width: 16px; height: 16px; }
 
 .tabs {
   display: flex;
@@ -477,11 +500,6 @@ main {
 }
 
 /* Notes & review photos */
-
-.profile-heading {
-  margin: 0 0 16px;
-  font-size: 18px;
-}
 
 .rank-note {
   color: var(--ink);

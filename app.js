@@ -21,6 +21,11 @@ const BUCKET_META = {
 
 const AMENITY_CATEGORIES = ["Gym", "Pool", "Room"];
 
+// Generic silhouette used for "you" wherever a friend would show an
+// avatar emoji — no profile photo, just a blank placeholder icon.
+const BLANK_AVATAR_SVG =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"/></svg>';
+
 function genCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -418,7 +423,7 @@ function render() {
     <header class="topbar">
       <div class="topbar-row">
         <div class="brand">🏨 Hotelify</div>
-        <button class="avatar profile-btn ${onOwnProfile ? "profile-btn-active" : ""}" data-tab="rankings" title="Your rankings">🙂</button>
+        <button class="avatar profile-btn ${onOwnProfile ? "profile-btn-active" : ""}" data-tab="rankings" title="Your rankings">${BLANK_AVATAR_SVG}</button>
       </div>
       <nav class="tabs">
         ${tabs
@@ -450,7 +455,7 @@ function renderActiveView() {
 
 function renderRankings() {
   const all = [...state.ranked].sort((a, b) => b.score - a.score);
-  const heading = `<h2 class="profile-heading">🙂 Your Rankings</h2>`;
+  const heading = `<h2 class="profile-heading"><span class="profile-heading-icon">${BLANK_AVATAR_SVG}</span> Your Rankings</h2>`;
   if (all.length === 0) {
     return heading + `<div class="empty">No ranked hotels yet. Head to <strong>Add a Hotel</strong> to rank your first stay.</div>`;
   }
@@ -755,7 +760,7 @@ function renderFriendProfile() {
 function renderFeed() {
   const ownItems = state.activity.map((a) => ({
     name: "You",
-    avatar: "🙂",
+    avatar: BLANK_AVATAR_SVG,
     hotelName: a.hotelName,
     subtitle: [a.city, a.country].filter(Boolean).join(", "),
     bucket: a.bucket,
