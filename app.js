@@ -406,17 +406,20 @@ function render() {
   }
 
   const tabs = [
-    ["rankings", "My Rankings"],
     ["wanttogo", "Want to Go"],
     ["add", "Add a Hotel"],
     ["discover", "Discover"],
     ["friends", "Friends"],
     ["feed", "Feed"],
   ];
+  const onOwnProfile = activeTab === "rankings" || activeTab === "amenities";
 
   root.innerHTML = `
     <header class="topbar">
-      <div class="brand">🏨 Hotelify</div>
+      <div class="topbar-row">
+        <div class="brand">🏨 Hotelify</div>
+        <button class="avatar profile-btn ${onOwnProfile ? "profile-btn-active" : ""}" data-tab="rankings" title="Your rankings">🙂</button>
+      </div>
       <nav class="tabs">
         ${tabs
           .map(
@@ -447,8 +450,9 @@ function renderActiveView() {
 
 function renderRankings() {
   const all = [...state.ranked].sort((a, b) => b.score - a.score);
+  const heading = `<h2 class="profile-heading">🙂 Your Rankings</h2>`;
   if (all.length === 0) {
-    return `<div class="empty">No ranked hotels yet. Head to <strong>Add a Hotel</strong> to rank your first stay.</div>`;
+    return heading + `<div class="empty">No ranked hotels yet. Head to <strong>Add a Hotel</strong> to rank your first stay.</div>`;
   }
   const rows = all
     .map((h, i) => {
@@ -476,7 +480,7 @@ function renderRankings() {
       </li>`;
     })
     .join("");
-  return `<ul class="rank-list">${rows}</ul>`;
+  return heading + `<ul class="rank-list">${rows}</ul>`;
 }
 
 function renderWantToGo() {
