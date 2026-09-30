@@ -199,6 +199,15 @@ function matchScore(friend) {
   return Math.max(0, Math.round(100 - avgDiff * 10));
 }
 
+function friendAvgScore(hotelId) {
+  const scores = state.following
+    .map(friendById)
+    .filter(Boolean)
+    .flatMap((f) => f.ranked.filter((fe) => fe.hotelId === hotelId).map((fe) => fe.score));
+  if (scores.length === 0) return null;
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
 function timeAgo(hours) {
   if (hours < 1) return "just now";
   if (hours < 24) return Math.round(hours) + "h ago";
@@ -440,7 +449,7 @@ function renderRankings() {
           : `<span class="tag-worth worth-no">⚠️ Not worth it</span>`;
       return `
       <li class="rank-row">
-        <span class="rank-num">${i + 1}</span>
+        <span class="rank-num" ${i < 5 ? 'style="visibility:hidden"' : ""}>${i + 1}</span>
         <div class="rank-info">
           <div class="rank-name">${escapeHtml(h.name)}</div>
           <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}</div>
@@ -488,19 +497,20 @@ function renderAddView() {
 
   const rows = results
     .slice(0, 30)
-    .map(
-      (h) => `
+    .map((h) => {
+      const favg = friendAvgScore(h.id);
+      return `
       <li class="rank-row">
         <div class="rank-info">
           <div class="rank-name">${escapeHtml(h.name)}</div>
-          <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}</div>
+          <div class="rank-sub">${escapeHtml(hotelSubtitle(h))}${favg !== null ? ` · 👥 Friends avg ${favg.toFixed(1)}` : ""}</div>
         </div>
         <div class="row-actions">
           <button class="pill-btn ghost" data-want="${h.id}">Want to Go</button>
           <button class="pill-btn" data-rank="${h.id}">I've stayed here</button>
         </div>
-      </li>`
-    )
+      </li>`;
+    })
     .join("");
 
   return `
@@ -550,11 +560,12 @@ function renderDiscover() {
   const rows = scored
     .map(({ hotel, score }) => {
       const badgeColor = score >= 70 ? "#2e7d4f" : score >= 45 ? "#b8860b" : "#7a756c";
+      const favg = friendAvgScore(hotel.id);
       return `
       <li class="rank-row">
         <div class="rank-info">
           <div class="rank-name">${escapeHtml(hotel.name)}</div>
-          <div class="rank-sub">${escapeHtml(hotelSubtitle(hotel))} · ${escapeHtml(whyText(hotel, prefs))}</div>
+          <div class="rank-sub">${escapeHtml(hotelSubtitle(hotel))} · ${escapeHtml(whyText(hotel, prefs))}${favg !== null ? ` · 👥 ${favg.toFixed(1)}` : ""}</div>
         </div>
         <div class="row-actions">
           <span class="badge" style="background:${badgeColor}">${score}%</span>
