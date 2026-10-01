@@ -297,6 +297,11 @@ main {
   margin-top: 20px;
 }
 
+.getting-there-note {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
 @media (max-width: 480px) {
   .rank-row { flex-wrap: wrap; }
 }

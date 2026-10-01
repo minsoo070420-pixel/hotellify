@@ -63,6 +63,19 @@ function dealsUrl(h) {
   return `https://www.google.com/travel/hotels?q=${query}`;
 }
 
+// Links to live Google Maps directions from the city's airport rather
+// than a hardcoded fare/time — this app has no real transit-pricing API,
+// so an invented "$12, 35 min" would just be a guess dressed up as fact.
+// Google Maps computes current, real transit vs. driving estimates.
+function gettingThereUrls(h) {
+  const destination = encodeURIComponent(h.address || [h.name, h.city, h.country].filter(Boolean).join(", "));
+  const origin = encodeURIComponent(`${h.city} airport`);
+  return {
+    transit: `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=transit`,
+    driving: `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`,
+  };
+}
+
 function hotelSubtitle(h) {
   return [h.city, h.country].filter(Boolean).join(", ");
 }
@@ -276,18 +289,28 @@ function renderAnswerStep() {
 
   const reasonsList = fit.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
 
-  const links =
-    hotel.website || hotel.address
-      ? `
+  const addressBlock = hotel.address
+    ? `
     <div class="detail-section">
-      ${hotel.address ? `<div class="detail-label">Address</div><div class="rank-sub">${escapeHtml(hotel.address)}</div>` : ""}
-    </div>
+      <div class="detail-label">Address</div>
+      <div class="rank-sub">${escapeHtml(hotel.address)}</div>
+    </div>`
+    : "";
+
+  const gt = gettingThereUrls(hotel);
+  const gettingThere = `
+    <div class="detail-section">
+      <div class="detail-label">Getting there from the airport</div>
+      <div class="detail-links">
+        <a class="pill-btn ghost" href="${gt.transit}" target="_blank" rel="noopener">🚆 Economical (transit)</a>
+        <a class="pill-btn ghost" href="${gt.driving}" target="_blank" rel="noopener">🚕 Fastest (drive/taxi)</a>
+      </div>
+      <p class="rank-sub getting-there-note">Opens live Google Maps directions — real current times/fares, not a guess.</p>
+    </div>`;
+
+  const links = `
     <div class="detail-links">
       ${hotel.website ? `<a class="pill-btn ghost" href="${hotel.website}" target="_blank" rel="noopener">🌐 Visit Website</a>` : ""}
-      <a class="pill-btn" href="${dealsUrl(hotel)}" target="_blank" rel="noopener">💰 Find Deals</a>
-    </div>`
-      : `
-    <div class="detail-links">
       <a class="pill-btn" href="${dealsUrl(hotel)}" target="_blank" rel="noopener">💰 Find Deals</a>
     </div>`;
 
@@ -303,6 +326,8 @@ function renderAnswerStep() {
 
     <ul class="reasons-list">${reasonsList}</ul>
 
+    ${addressBlock}
+    ${gettingThere}
     ${links}
 
     <div class="detail-actions">
