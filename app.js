@@ -60,6 +60,27 @@ let selectedHotel = null;
 let selectedTheme = null;
 let showCustomHotelForm = false;
 
+// AI trip plan (Gemini). The API key lives ONLY in localStorage, entered
+// by the user at runtime in this running page — never written into a
+// source file, so it never ends up in a git commit. If this app is ever
+// hosted somewhere other than your own machine, anyone with dev tools
+// open on that page could still read the key out of the request, same
+// as any client-side API call — keep that in mind before deploying it
+// publicly with a real key attached.
+const GEMINI_KEY_STORAGE = "hotelify_gemini_key";
+const GEMINI_MODEL = "gemini-2.0-flash";
+const TRIP_LENGTH_OPTIONS = [
+  { nights: 1, label: "1 night" },
+  { nights: 2, label: "2 nights" },
+  { nights: 3, label: "3 nights" },
+  { nights: 4, label: "4+ nights" },
+];
+let showKeyForm = false;
+let aiPlan = null;
+let aiPlanLoading = false;
+let aiPlanError = null;
+let tripNights = 2;
+
 // ---------- data helpers ----------
 
 function uniqueCities() {
@@ -75,7 +96,10 @@ function makeCustomId() {
   return "custom-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
 }
 
-function dealsUrl(h) {
+// Fallback only, for hotels with no known official site (custom/manual
+// entries) — a general search rather than a fabricated booking link.
+// Any hotel with a real `website` on file books there directly instead.
+function hotelSearchFallbackUrl(h) {
   const query = encodeURIComponent([h.name, h.city, h.country].filter(Boolean).join(" "));
   return `https://www.google.com/travel/hotels?q=${query}`;
 }
@@ -91,6 +115,50 @@ function gettingThereUrls(h) {
     transit: `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=transit`,
     driving: `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`,
   };
+}
+
+// ---------- Gemini trip planning ----------
+
+function getGeminiKey() {
+  return localStorage.getItem(GEMINI_KEY_STORAGE) || "";
+}
+
+function setGeminiKey(key) {
+  localStorage.setItem(GEMINI_KEY_STORAGE, key.trim());
+}
+
+function clearGeminiKey() {
+  localStorage.removeItem(GEMINI_KEY_STORAGE);
+}
+
+async function generateTripPlan(hotel, themeKey, nights) {
+  const theme = THEME_META[themeKey];
+  const key = getGeminiKey();
+  const nearbyList = hotel.nearby && hotel.nearby.length ? hotel.nearby.join(", ") : "no specific landmarks on file";
+  const isOpenEnded = nights >= 4;
+  const days = nights + 1;
+  const lengthPhrase = isOpenEnded ? "an extended stay of 4 or more nights (plan the first 4 days, then note it extends similarly)" : `a ${nights}-night, ${days}-day trip`;
+  const wordBudget = Math.min(550, 110 * Math.min(nights, 4) + 100);
+  const structureHint = nights === 1 ? "a single morning / afternoon / evening plan" : `a day-by-day plan (Day 1, Day 2, ... Day ${Math.min(nights, 4)})`;
+  const prompt = `You are a concise, practical trip planner. Plan ${lengthPhrase} for a ${theme.label}-themed trip based at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""}. Known real landmarks near this hotel: ${nearbyList}. Write ${structureHint} (a few sentences per segment), grounded in the real landmarks listed where they fit, calling out roughly how each stop suits a ${theme.label.toLowerCase()} trip. Keep it under ${wordBudget} words total, plain text, no markdown headers.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg = body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+  if (!text) throw new Error("Gemini returned an empty response.");
+  return text.trim();
 }
 
 function hotelSubtitle(h) {
@@ -149,6 +217,9 @@ function chooseTheme(themeKey) {
 
 function chooseHotel(hotel) {
   selectedHotel = hotel;
+  aiPlan = null;
+  aiPlanError = null;
+  tripNights = 2;
   const fit = evaluateFit(hotel, selectedTheme);
   recordTripMatch({
     id: "trip-" + Date.now(),
@@ -169,7 +240,29 @@ function planNewTrip() {
   selectedTheme = null;
   cityQuery = "";
   showCustomHotelForm = false;
+  aiPlan = null;
+  aiPlanError = null;
+  aiPlanLoading = false;
+  showKeyForm = false;
   step = "city";
+  render();
+}
+
+async function planTheTrip() {
+  if (!getGeminiKey()) {
+    showKeyForm = true;
+    render();
+    return;
+  }
+  aiPlanLoading = true;
+  aiPlanError = null;
+  render();
+  try {
+    aiPlan = await generateTripPlan(selectedHotel, selectedTheme, tripNights);
+  } catch (e) {
+    aiPlanError = e.message || "Something went wrong generating the plan.";
+  }
+  aiPlanLoading = false;
   render();
 }
 
@@ -194,7 +287,7 @@ function render() {
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
-        <div class="brand">${LOGO_SVG} Hotelify</div>
+        <button class="brand brand-btn" data-plan-new title="Start a new trip">${LOGO_SVG} Hotelify</button>
         <div class="header-right">
           <button class="journal-badge" data-view-journal title="Your Trip Journal">📖 Journal</button>
         </div>
@@ -310,6 +403,15 @@ function renderAnswerStep() {
     </div>`
     : "";
 
+  const nearbyBlock =
+    hotel.nearby && hotel.nearby.length
+      ? `
+    <div class="detail-section">
+      <div class="detail-label">Nearby</div>
+      <div class="rank-sub">${hotel.nearby.map(escapeHtml).join(" · ")}</div>
+    </div>`
+      : "";
+
   const gt = gettingThereUrls(hotel);
   const gettingThere = `
     <div class="detail-section">
@@ -321,11 +423,18 @@ function renderAnswerStep() {
       <p class="rank-sub getting-there-note">Opens live Google Maps directions — real current times/fares, not a guess.</p>
     </div>`;
 
-  const links = `
+  const links = hotel.website
+    ? `
     <div class="detail-links">
-      ${hotel.website ? `<a class="pill-btn ghost" href="${hotel.website}" target="_blank" rel="noopener">🌐 Visit Website</a>` : ""}
-      <a class="pill-btn" href="${dealsUrl(hotel)}" target="_blank" rel="noopener">💰 Find Deals</a>
-    </div>`;
+      <a class="pill-btn" href="${hotel.website}" target="_blank" rel="noopener">📅 Book on Official Site</a>
+    </div>`
+    : `
+    <div class="detail-links">
+      <a class="pill-btn ghost" href="${hotelSearchFallbackUrl(hotel)}" target="_blank" rel="noopener">🔍 Search for this hotel</a>
+    </div>
+    <p class="rank-sub getting-there-note">No official site on file for this hotel — this opens a general search instead.</p>`;
+
+  const planSection = renderPlanSection();
 
   return `
     <button class="icon-btn back-btn" data-step="hotel">← Change hotel</button>
@@ -340,16 +449,82 @@ function renderAnswerStep() {
     <ul class="reasons-list">${reasonsList}</ul>
 
     ${addressBlock}
+    ${nearbyBlock}
     ${gettingThere}
     ${links}
+
+    ${planSection}
 
     <div class="detail-actions">
       <button class="pill-btn ghost" data-step="theme">Try a different theme</button>
       <button class="pill-btn ghost" data-step="hotel">Try a different hotel</button>
-      <button class="pill-btn" data-plan-new>Plan a new trip</button>
     </div>
     <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
+}
+
+function renderPlanSection() {
+  if (showKeyForm) {
+    return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">Gemini API key</div>
+      <p class="rank-sub">Stored only in this browser's localStorage — never written to a file, never committed to git. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
+      <form id="gemini-key-form" class="custom-add">
+        <input id="gemini-key-input" type="password" placeholder="Paste your Gemini API key" required autocomplete="off" />
+        <button type="submit" class="pill-btn">Save</button>
+      </form>
+      <button class="icon-btn" id="cancel-key-form">Cancel</button>
+    </div>`;
+  }
+
+  const lengthChips = `
+    <div class="chip-row">
+      ${TRIP_LENGTH_OPTIONS.map(
+        (o) => `<button class="chip ${tripNights === o.nights ? "chip-active" : ""}" data-trip-length="${o.nights}">${o.label}</button>`
+      ).join("")}
+    </div>`;
+
+  if (aiPlanLoading) {
+    return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">✨ AI Trip Plan</div>
+      <p class="rank-sub">Generating your plan with Gemini…</p>
+    </div>`;
+  }
+
+  if (aiPlanError) {
+    return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">✨ AI Trip Plan</div>
+      ${lengthChips}
+      <p class="rank-sub plan-error">${escapeHtml(aiPlanError)}</p>
+      <div class="detail-links">
+        <button class="pill-btn ghost" data-plan-trip>Try again</button>
+        <button class="icon-btn" id="change-key-link">Change API key</button>
+      </div>
+    </div>`;
+  }
+
+  if (aiPlan) {
+    return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">✨ AI Trip Plan <span class="rank-sub">(via Gemini — not the rule-based score above)</span></div>
+      ${lengthChips}
+      <p class="rank-sub ai-plan-text">${escapeHtml(aiPlan)}</p>
+      <div class="detail-links">
+        <button class="pill-btn ghost" data-plan-trip>Regenerate</button>
+        <button class="icon-btn" id="change-key-link">Change API key</button>
+      </div>
+    </div>`;
+  }
+
+  return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">How long is the trip?</div>
+      ${lengthChips}
+      <button class="pill-btn" data-plan-trip>✨ Plan the Trip</button>
+      <p class="rank-sub">Uses Gemini to sketch an itinerary near ${escapeHtml(selectedHotel.name)} for this theme.</p>
+    </div>`;
 }
 
 function renderJournal() {
@@ -396,12 +571,56 @@ function bindEvents() {
   root.querySelectorAll("[data-step]").forEach((btn) => {
     btn.addEventListener("click", () => {
       step = btn.dataset.step;
+      aiPlan = null;
+      aiPlanError = null;
+      showKeyForm = false;
       render();
     });
   });
 
   const planNewBtn = root.querySelector("[data-plan-new]");
   if (planNewBtn) planNewBtn.addEventListener("click", planNewTrip);
+
+  const planTripBtn = root.querySelector("[data-plan-trip]");
+  if (planTripBtn) planTripBtn.addEventListener("click", planTheTrip);
+
+  root.querySelectorAll("[data-trip-length]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tripNights = Number(btn.dataset.tripLength);
+      render();
+    });
+  });
+
+  const cancelKeyBtn = document.getElementById("cancel-key-form");
+  if (cancelKeyBtn) {
+    cancelKeyBtn.addEventListener("click", () => {
+      showKeyForm = false;
+      render();
+    });
+  }
+
+  const changeKeyBtn = document.getElementById("change-key-link");
+  if (changeKeyBtn) {
+    changeKeyBtn.addEventListener("click", () => {
+      clearGeminiKey();
+      aiPlan = null;
+      aiPlanError = null;
+      showKeyForm = true;
+      render();
+    });
+  }
+
+  const geminiKeyForm = document.getElementById("gemini-key-form");
+  if (geminiKeyForm) {
+    geminiKeyForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const key = document.getElementById("gemini-key-input").value.trim();
+      if (!key) return;
+      setGeminiKey(key);
+      showKeyForm = false;
+      planTheTrip();
+    });
+  }
 
   root.querySelectorAll("[data-pick-city]").forEach((btn) => {
     btn.addEventListener("click", () => chooseCity(btn.dataset.pickCity));
