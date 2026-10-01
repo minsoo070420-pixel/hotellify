@@ -68,7 +68,7 @@ let showCustomHotelForm = false;
 // as any client-side API call — keep that in mind before deploying it
 // publicly with a real key attached.
 const GEMINI_KEY_STORAGE = "hotelify_gemini_key";
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const TRIP_LENGTH_OPTIONS = [
   { nights: 1, label: "1 night" },
   { nights: 2, label: "2 nights" },
