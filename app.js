@@ -157,7 +157,7 @@ async function generateTripPlan(hotel, themeKey, nights) {
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
-  if (!text) throw new Error("Gemini returned an empty response.");
+  if (!text) throw new Error("The AI returned an empty response.");
   return text.trim();
 }
 
@@ -467,10 +467,10 @@ function renderPlanSection() {
   if (showKeyForm) {
     return `
     <div class="detail-section plan-section">
-      <div class="detail-label">Gemini API key</div>
+      <div class="detail-label">AI API key</div>
       <p class="rank-sub">Stored only in this browser's localStorage — never written to a file, never committed to git. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
       <form id="gemini-key-form" class="custom-add">
-        <input id="gemini-key-input" type="password" placeholder="Paste your Gemini API key" required autocomplete="off" />
+        <input id="gemini-key-input" type="password" placeholder="Paste your AI API key" required autocomplete="off" />
         <button type="submit" class="pill-btn">Save</button>
       </form>
       <button class="icon-btn" id="cancel-key-form">Cancel</button>
@@ -488,7 +488,7 @@ function renderPlanSection() {
     return `
     <div class="detail-section plan-section">
       <div class="detail-label">✨ AI Trip Plan</div>
-      <p class="rank-sub">Generating your plan with Gemini…</p>
+      <p class="rank-sub">Generating your plan…</p>
     </div>`;
   }
 
@@ -508,7 +508,7 @@ function renderPlanSection() {
   if (aiPlan) {
     return `
     <div class="detail-section plan-section">
-      <div class="detail-label">✨ AI Trip Plan <span class="rank-sub">(via Gemini — not the rule-based score above)</span></div>
+      <div class="detail-label">✨ AI Trip Plan <span class="rank-sub">(AI-generated — not the rule-based score above)</span></div>
       ${lengthChips}
       <p class="rank-sub ai-plan-text">${escapeHtml(aiPlan)}</p>
       <div class="detail-links">
@@ -523,7 +523,7 @@ function renderPlanSection() {
       <div class="detail-label">How long is the trip?</div>
       ${lengthChips}
       <button class="pill-btn" data-plan-trip>✨ Plan the Trip</button>
-      <p class="rank-sub">Uses Gemini to sketch an itinerary near ${escapeHtml(selectedHotel.name)} for this theme.</p>
+      <p class="rank-sub">Uses AI to sketch an itinerary near ${escapeHtml(selectedHotel.name)} for this theme.</p>
     </div>`;
 }
 
