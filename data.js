@@ -46,54 +46,69 @@ const TIER_META = {
   luxury: { label: "Luxurious", emoji: "✨" },
 };
 
-const ATTRACTION_TAGS = ["MLB", "NBA", "Historical", "Beach", "Nature", "Nightlife", "Museums", "Shopping", "Foodie"];
-
-// Mock friends with pre-existing ranked lists, used to demo the social
-// feed and match-score features without a real backend. `hoursAgo` is
-// relative to "now" so the feed always looks fresh when demoed.
-const MOCK_FRIENDS = [
-  {
-    id: "f1",
-    name: "Jordan Lee",
-    avatar: "🧳",
-    ranked: [
-      { hotelId: "h2", bucket: "liked", score: 9.6, hoursAgo: 4 },
-      { hotelId: "h9", bucket: "liked", score: 8.1, hoursAgo: 30 },
-      { hotelId: "h4", bucket: "fine", score: 5.4, hoursAgo: 55 },
-      { hotelId: "h11", bucket: "disliked", score: 2.0, hoursAgo: 100 },
-    ],
+// Trip themes for the fit-matching flow: city -> hotel -> theme -> answer.
+// `tags`/`tierBoost` drive the fit score against a hotel's own tags/tier;
+// `tagReasons` supplies the human-readable explanation for each match.
+const THEME_META = {
+  romantic: {
+    label: "Romantic",
+    emoji: "💕",
+    blurb: "A getaway built for two",
+    tierBoost: ["luxury"],
+    tags: ["Beach", "Historical", "Foodie", "Nightlife"],
+    tagReasons: {
+      Beach: "a scenic beach backdrop for sunset walks",
+      Historical: "charming historic streets perfect for romantic strolls",
+      Foodie: "acclaimed restaurants nearby for a special dinner",
+      Nightlife: "intimate bars and lounges for an evening out",
+    },
   },
-  {
-    id: "f2",
-    name: "Priya Nair",
-    avatar: "✈️",
-    ranked: [
-      { hotelId: "h6", bucket: "liked", score: 9.9, hoursAgo: 10 },
-      { hotelId: "h13", bucket: "liked", score: 8.7, hoursAgo: 40 },
-      { hotelId: "h1", bucket: "fine", score: 6.0, hoursAgo: 70 },
-      { hotelId: "h9", bucket: "fine", score: 4.2, hoursAgo: 95 },
-    ],
+  family: {
+    label: "Family",
+    emoji: "👨‍👩‍👧",
+    blurb: "Fun and easy for everyone",
+    tierBoost: ["moderate", "budget"],
+    tags: ["Beach", "Nature", "Museums", "Shopping"],
+    tagReasons: {
+      Beach: "an easy, safe beach for the kids",
+      Nature: "outdoor space for the whole family to explore",
+      Museums: "kid-friendly museums and attractions close by",
+      Shopping: "family-friendly shopping nearby",
+    },
   },
-  {
-    id: "f3",
-    name: "Marcus Chen",
-    avatar: "🌍",
-    ranked: [
-      { hotelId: "h15", bucket: "liked", score: 10.0, hoursAgo: 2 },
-      { hotelId: "h14", bucket: "liked", score: 8.9, hoursAgo: 20 },
-      { hotelId: "h7", bucket: "liked", score: 7.5, hoursAgo: 65 },
-      { hotelId: "h24", bucket: "disliked", score: 3.0, hoursAgo: 120 },
-    ],
+  business: {
+    label: "Business",
+    emoji: "💼",
+    blurb: "Efficient and well-located",
+    tierBoost: ["luxury", "moderate"],
+    tags: ["Historical", "Shopping", "Foodie", "Nightlife"],
+    tagReasons: {
+      Historical: "centrally located in the city core",
+      Shopping: "close to the main commercial district",
+      Foodie: "solid options nearby for client dinners",
+      Nightlife: "convenient spots to unwind after meetings",
+    },
   },
-  {
-    id: "f4",
-    name: "Sofia Ricci",
-    avatar: "🗺️",
-    ranked: [
-      { hotelId: "h13", bucket: "liked", score: 9.4, hoursAgo: 15 },
-      { hotelId: "h23", bucket: "liked", score: 9.0, hoursAgo: 45 },
-      { hotelId: "h10", bucket: "fine", score: 5.8, hoursAgo: 80 },
-      { hotelId: "h17", bucket: "fine", score: 4.6, hoursAgo: 130 },
-    ],
+  adventure: {
+    label: "Adventure",
+    emoji: "🧗",
+    blurb: "Built around getting outside",
+    tierBoost: [],
+    tags: ["Nature", "Beach"],
+    tagReasons: {
+      Nature: "easy access to trails and the outdoors",
+      Beach: "water sports and beach adventures nearby",
+    },
   },
-];
+  relaxation: {
+    label: "Relaxation",
+    emoji: "🧘",
+    blurb: "Slow down and unwind",
+    tierBoost: ["luxury"],
+    tags: ["Beach", "Nature"],
+    tagReasons: {
+      Beach: "a tranquil beachfront setting to unwind",
+      Nature: "peaceful natural surroundings for total relaxation",
+    },
+  },
+};
