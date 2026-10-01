@@ -185,6 +185,19 @@ main {
   white-space: nowrap;
 }
 
+.link-name {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  display: block;
+}
+.link-name:hover { text-decoration: underline; }
+
 .rank-sub {
   color: var(--muted);
   font-size: 13px;
@@ -235,6 +248,8 @@ main {
   white-space: nowrap;
   flex-shrink: 0;
   transition: opacity 0.15s ease;
+  text-decoration: none;
+  display: inline-block;
 }
 .pill-btn:hover { opacity: 0.85; }
 
@@ -544,6 +559,39 @@ main {
   align-items: flex-start;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* Hotel detail page (Discover) */
+
+.detail-scores {
+  display: flex;
+  gap: 24px;
+  margin: 16px 0;
+}
+
+.detail-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-section {
+  margin: 18px 0;
+}
+
+.detail-label {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.detail-links,
+.detail-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
 }
 
 /* Notes & review photos */

@@ -57,6 +57,7 @@ let pendingRankHotel = null;
 let pendingBucket = null;
 let viewingFriendId = null;
 let viewingRankedId = null;
+let viewingHotelId = null;
 let showInvite = false;
 let searchQuery = "";
 let copyFeedback = false;
@@ -246,15 +247,15 @@ function computePreferences() {
   return { tierPref, tagPref };
 }
 
-function recommendationScore(hotel, prefs) {
+function recommendationScore(hotel, prefs, tiers = selectedTiers, tags = selectedTags) {
   let score = 50;
   score += (prefs.tierPref[hotel.tier] || 0) * 10;
   (hotel.tags || []).forEach((t) => {
     score += (prefs.tagPref[t] || 0) * 8;
   });
-  if (selectedTiers.size && selectedTiers.has(hotel.tier)) score += 15;
+  if (tiers.size && tiers.has(hotel.tier)) score += 15;
   (hotel.tags || []).forEach((t) => {
-    if (selectedTags.has(t)) score += 12;
+    if (tags.has(t)) score += 12;
   });
   return Math.max(1, Math.min(99, Math.round(score)));
 }
@@ -453,6 +454,7 @@ function renderActiveView() {
   if (activeTab === "wanttogo") return renderWantToGo();
   if (activeTab === "add") return renderAddView();
   if (activeTab === "discover") return renderDiscover();
+  if (activeTab === "hotelDetail") return renderHotelDetail();
   if (activeTab === "friends") return renderFriends();
   if (activeTab === "friendProfile") return renderFriendProfile();
   if (activeTab === "feed") return renderFeed();
@@ -597,7 +599,7 @@ function renderDiscover() {
       return `
       <li class="rank-row">
         <div class="rank-info">
-          <div class="rank-name">${escapeHtml(hotel.name)}</div>
+          <button class="rank-name link-name" data-view-hotel="${hotel.id}">${escapeHtml(hotel.name)}</button>
           <div class="rank-sub">${escapeHtml(hotelSubtitle(hotel))} · ${escapeHtml(whyText(hotel, prefs))}${favg !== null ? ` · 👥 ${favg.toFixed(1)}` : ""}</div>
         </div>
         <div class="row-actions">
@@ -615,6 +617,65 @@ function renderDiscover() {
     <div class="chip-row">${tierChips}</div>
     <div class="chip-row">${tagChips}</div>
     <ul class="rank-list">${rows || '<div class="empty">No matches — try clearing a filter.</div>'}</ul>
+  `;
+}
+
+function renderHotelDetail() {
+  const hotel = hotelById(viewingHotelId);
+  if (!hotel) return `<div class="empty">Hotel not found.</div>`;
+
+  const prefs = computePreferences();
+  const score = recommendationScore(hotel, prefs, new Set(), new Set());
+  const favg = friendAvgScore(hotel.id);
+  const taken = allTakenIds();
+  const tagChips = (hotel.tags || []).map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
+
+  const scoreRow = `
+    <div class="detail-scores">
+      <div class="detail-score">
+        <span class="badge" style="background:${score >= 70 ? "#2e7d4f" : score >= 45 ? "#b8860b" : "#7a756c"}">${score}%</span>
+        <span class="rank-sub">Rec score</span>
+      </div>
+      ${
+        favg !== null
+          ? `<div class="detail-score">
+        <span class="badge" style="background:#2e7d4f">${favg.toFixed(1)}</span>
+        <span class="rank-sub">Friends avg</span>
+      </div>`
+          : ""
+      }
+    </div>
+  `;
+
+  const actions = taken.has(hotel.id)
+    ? ""
+    : `
+    <div class="detail-actions">
+      <button class="pill-btn ghost" data-want="${hotel.id}">Want to Go</button>
+      <button class="pill-btn" data-rank="${hotel.id}">I've stayed here</button>
+    </div>
+  `;
+
+  return `
+    <button class="icon-btn back-btn" data-tab="discover">← Discover</button>
+    <h2>${escapeHtml(hotel.name)}</h2>
+    <p class="rank-sub">${escapeHtml(TIER_META[hotel.tier].label)} · ${escapeHtml(hotelSubtitle(hotel))}</p>
+
+    ${scoreRow}
+
+    <div class="chip-row">${tagChips}</div>
+
+    <div class="detail-section">
+      <div class="detail-label">Address</div>
+      <div class="rank-sub">${escapeHtml(hotel.address || hotelSubtitle(hotel))}</div>
+    </div>
+
+    <div class="detail-links">
+      <a class="pill-btn ghost" href="${hotel.website}" target="_blank" rel="noopener">🌐 Visit Website</a>
+      <a class="pill-btn" href="${dealsUrl(hotel)}" target="_blank" rel="noopener">💰 Find Deals</a>
+    </div>
+
+    ${actions}
   `;
 }
 
@@ -929,6 +990,13 @@ function bindGlobalEvents() {
     btn.addEventListener("click", () => {
       viewingFriendId = btn.dataset.viewFriend;
       activeTab = "friendProfile";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-view-hotel]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      viewingHotelId = btn.dataset.viewHotel;
+      activeTab = "hotelDetail";
       render();
     });
   });
