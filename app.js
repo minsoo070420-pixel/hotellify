@@ -448,6 +448,10 @@ function renderAnswerStep() {
 
     <ul class="reasons-list">${reasonsList}</ul>
 
+    <div class="share-section">
+      <button class="pill-btn" id="share-match-btn">📤 Share Your Match</button>
+    </div>
+
     ${addressBlock}
     ${nearbyBlock}
     ${gettingThere}
@@ -461,6 +465,203 @@ function renderAnswerStep() {
     </div>
     <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
+}
+
+// ---------- shareable match card ----------
+// Renders the fit result as a downloadable/shareable PNG (canvas, drawn
+// client-side — no server, no image-generation API). This is the app's
+// main growth lever: the shared image doubles as an ad for Hotelify.
+
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "hotel";
+}
+
+function wrapCenteredText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const words = text.split(" ");
+  let line = "";
+  const lines = [];
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + " ";
+    if (ctx.measureText(testLine).width > maxWidth && n > 0) {
+      lines.push(line.trim());
+      line = words[n] + " ";
+    } else {
+      line = testLine;
+    }
+  }
+  lines.push(line.trim());
+  const clipped = maxLines ? lines.slice(0, maxLines) : lines;
+  clipped.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+  return clipped.length;
+}
+
+function drawShareLogo(ctx, x, y, size) {
+  const scale = size / 32;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  const grad = ctx.createLinearGradient(4, 6, 28, 26);
+  grad.addColorStop(0, "#4ade80");
+  grad.addColorStop(1, "#047857");
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2.75;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(5, 17);
+  ctx.lineTo(16, 6);
+  ctx.lineTo(27, 17);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(10, 19.5);
+  ctx.lineTo(10, 26);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(22, 19.5);
+  ctx.lineTo(22, 26);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(8, 26);
+  ctx.lineTo(24, 26);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function buildShareCanvas(hotel, themeKey) {
+  const theme = THEME_META[themeKey];
+  const fit = evaluateFit(hotel, themeKey);
+  const W = 1080;
+  const H = 1920;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const font = (weight, size, style) => `${style ? style + " " : ""}${weight} ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, "#eaf4ec");
+  bgGrad.addColorStop(1, "#ffffff");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawShareLogo(ctx, 90, 115, 64);
+  ctx.fillStyle = "#1c1b19";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = font(700, 48);
+  ctx.fillText("Hotelify", 170, 147);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = font(400, 150);
+  ctx.fillText(theme.emoji, W / 2, 440);
+
+  ctx.font = font(600, 42);
+  ctx.fillStyle = "#7a756c";
+  ctx.fillText(`${theme.label} Trip`, W / 2, 510);
+
+  ctx.fillStyle = "#1c1b19";
+  ctx.font = font(700, 62);
+  const nameLines = wrapCenteredText(ctx, hotel.name, W / 2, 630, 880, 72, 3);
+
+  const subtitleY = 630 + nameLines * 72 + 36;
+  ctx.font = font(500, 38);
+  ctx.fillStyle = "#7a756c";
+  ctx.fillText(hotelSubtitle(hotel), W / 2, subtitleY);
+
+  const circleY = subtitleY + 190;
+  const circleR = 150;
+  ctx.beginPath();
+  ctx.arc(W / 2, circleY, circleR, 0, Math.PI * 2);
+  ctx.fillStyle = fit.color;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "middle";
+  ctx.font = font(700, 96);
+  ctx.fillText(`${fit.score}%`, W / 2, circleY - 8);
+  ctx.font = font(600, 32);
+  ctx.fillText(fit.verdict, W / 2, circleY + 76);
+
+  ctx.fillStyle = "#1c1b19";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = font(400, 38, "italic");
+  const reasonY = circleY + circleR + 130;
+  wrapCenteredText(ctx, `"${fit.reasons[0]}"`, W / 2, reasonY, 820, 54, 3);
+
+  ctx.strokeStyle = "#e7e2da";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(90, H - 160);
+  ctx.lineTo(W - 90, H - 160);
+  ctx.stroke();
+
+  ctx.fillStyle = "#7a756c";
+  ctx.font = font(500, 34);
+  ctx.fillText("Find your own trip-fit match at Hotelify", W / 2, H - 90);
+
+  return canvas;
+}
+
+function openShareModal(hotel, themeKey) {
+  const canvas = buildShareCanvas(hotel, themeKey);
+  const theme = THEME_META[themeKey];
+  const fit = evaluateFit(hotel, themeKey);
+  const dataUrl = canvas.toDataURL("image/png");
+  const canShareNative = typeof navigator.share === "function";
+
+  const overlay = document.createElement("div");
+  overlay.className = "share-modal-overlay";
+  overlay.innerHTML = `
+    <div class="share-modal">
+      <button class="icon-btn share-modal-close" id="share-modal-close">✕ Close</button>
+      <div class="share-canvas-wrap"><img src="${dataUrl}" alt="Shareable match card for ${escapeHtml(hotel.name)}" /></div>
+      <div class="share-modal-actions">
+        <button class="pill-btn" id="share-download-btn">⬇️ Download</button>
+        ${canShareNative ? `<button class="pill-btn ghost" id="share-native-btn">📤 Share</button>` : ""}
+      </div>
+      <p class="rank-sub share-modal-note">Long-press or right-click the image to save it, or use the buttons above — great for Instagram Stories or TikTok.</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  document.getElementById("share-modal-close").addEventListener("click", close);
+
+  document.getElementById("share-download-btn").addEventListener("click", () => {
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hotelify-${slugify(hotel.name)}-${themeKey}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  });
+
+  if (canShareNative) {
+    document.getElementById("share-native-btn").addEventListener("click", () => {
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        try {
+          const file = new File([blob], `hotelify-${slugify(hotel.name)}.png`, { type: "image/png" });
+          if (navigator.canShare && !navigator.canShare({ files: [file] })) return;
+          await navigator.share({
+            files: [file],
+            title: "Hotelify",
+            text: `My ${theme.label} trip match: ${hotel.name} (${fit.score}% fit)`,
+          });
+        } catch (e) {
+          // Share sheet dismissed or unsupported — nothing to do.
+        }
+      }, "image/png");
+    });
+  }
 }
 
 function renderPlanSection() {
@@ -577,6 +778,11 @@ function bindEvents() {
       render();
     });
   });
+
+  const shareBtn = document.getElementById("share-match-btn");
+  if (shareBtn) {
+    shareBtn.addEventListener("click", () => openShareModal(selectedHotel, selectedTheme));
+  }
 
   const planNewBtn = root.querySelector("[data-plan-new]");
   if (planNewBtn) planNewBtn.addEventListener("click", planNewTrip);
