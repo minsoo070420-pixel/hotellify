@@ -116,24 +116,25 @@ function chooseCity(city) {
   selectedCity = city;
   selectedHotel = null;
   showCustomHotelForm = false;
-  step = "hotel";
-  render();
-}
-
-function chooseHotel(hotel) {
-  selectedHotel = hotel;
   step = "theme";
   render();
 }
 
 function chooseTheme(themeKey) {
   selectedTheme = themeKey;
-  const fit = evaluateFit(selectedHotel, themeKey);
+  showCustomHotelForm = false;
+  step = "hotel";
+  render();
+}
+
+function chooseHotel(hotel) {
+  selectedHotel = hotel;
+  const fit = evaluateFit(hotel, selectedTheme);
   recordTripMatch({
     id: "trip-" + Date.now(),
-    city: selectedHotel.city,
-    hotelName: selectedHotel.name,
-    themeKey,
+    city: hotel.city,
+    hotelName: hotel.name,
+    themeKey: selectedTheme,
     score: fit.score,
     verdict: fit.verdict,
     timestamp: Date.now(),
@@ -186,8 +187,8 @@ function render() {
 
 function renderStep() {
   if (step === "city") return renderCityStep();
-  if (step === "hotel") return renderHotelStep();
   if (step === "theme") return renderThemeStep();
+  if (step === "hotel") return renderHotelStep();
   if (step === "answer") return renderAnswerStep();
   if (step === "journal") return renderJournal();
   return "";
@@ -219,16 +220,40 @@ function renderCityStep() {
   `;
 }
 
+function renderThemeStep() {
+  const cards = THEME_KEYS.map((key) => {
+    const t = THEME_META[key];
+    return `
+      <button class="theme-card" data-pick-theme="${key}">
+        <div class="theme-emoji">${t.emoji}</div>
+        <div class="theme-label">${t.label}</div>
+        <div class="rank-sub">${t.blurb}</div>
+      </button>`;
+  }).join("");
+
+  return `
+    <button class="icon-btn back-btn" data-step="city">← Change city</button>
+    <h2 class="step-heading">What's the vibe for this trip?</h2>
+    <p class="rank-sub">Traveling to ${escapeHtml(selectedCity)}</p>
+    <div class="theme-grid">${cards}</div>
+  `;
+}
+
 function renderHotelStep() {
-  const hotels = hotelsInCity(selectedCity);
+  const theme = THEME_META[selectedTheme];
+  const hotels = hotelsInCity(selectedCity)
+    .map((h) => ({ hotel: h, fit: evaluateFit(h, selectedTheme) }))
+    .sort((a, b) => b.fit.score - a.fit.score);
+
   const rows = hotels
     .map(
-      (h) => `
+      ({ hotel: h, fit }) => `
       <button class="rank-row hotel-row" data-pick-hotel="${h.id}">
         <div class="rank-info">
           <div class="rank-name">${escapeHtml(h.name)}</div>
           <div class="rank-sub">${escapeHtml(TIER_META[h.tier].label)}${h.tags && h.tags.length ? " · " + h.tags.slice(0, 3).join(", ") : ""}</div>
         </div>
+        <span class="badge" style="background:${fit.color}">${fit.score}%</span>
       </button>`
     )
     .join("");
@@ -242,29 +267,11 @@ function renderHotelStep() {
     : `<button class="pill-btn ghost" id="show-custom-hotel">Can't find it? Enter it manually</button>`;
 
   return `
-    <button class="icon-btn back-btn" data-step="city">← Change city</button>
+    <button class="icon-btn back-btn" data-step="theme">← Change theme</button>
     <h2 class="step-heading">Choose your hotel in ${escapeHtml(selectedCity)}</h2>
+    <p class="rank-sub">${theme.emoji} ${theme.label} trip · scores show fit for this vibe</p>
     <div class="rank-list">${rows || `<div class="empty">No hotels on file for ${escapeHtml(selectedCity)} yet.</div>`}</div>
     <div class="custom-add-wrap">${customForm}</div>
-  `;
-}
-
-function renderThemeStep() {
-  const cards = THEME_KEYS.map((key) => {
-    const t = THEME_META[key];
-    return `
-      <button class="theme-card" data-pick-theme="${key}">
-        <div class="theme-emoji">${t.emoji}</div>
-        <div class="theme-label">${t.label}</div>
-        <div class="rank-sub">${t.blurb}</div>
-      </button>`;
-  }).join("");
-
-  return `
-    <button class="icon-btn back-btn" data-step="hotel">← Change hotel</button>
-    <h2 class="step-heading">What's the vibe for this trip?</h2>
-    <p class="rank-sub">${escapeHtml(selectedHotel.name)} · ${escapeHtml(hotelSubtitle(selectedHotel))}</p>
-    <div class="theme-grid">${cards}</div>
   `;
 }
 
@@ -301,7 +308,7 @@ function renderAnswerStep() {
     </div>`;
 
   return `
-    <button class="icon-btn back-btn" data-step="theme">← Change theme</button>
+    <button class="icon-btn back-btn" data-step="hotel">← Change hotel</button>
     <div class="answer-header">
       <span class="badge answer-badge" style="background:${fit.color}">${fit.score}%</span>
       <div>
