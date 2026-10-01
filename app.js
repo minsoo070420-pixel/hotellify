@@ -2,15 +2,13 @@
 // Flow: pick a city -> pick a hotel in it -> pick a trip theme -> get a
 // fit score + reasons for why that hotel suits that theme.
 //
-// Two mechanics borrowed deliberately from why Beli got trendy (research
-// notes, not folklore): a daily streak (loss-aversion habit loop — you
-// keep a streak by planning a trip, same mechanic Snapchat trained Gen Z
-// to protect) and a "Trip Journal" that frames past results as a personal
-// travel memory rather than a one-off lookup (Beli succeeded partly by
-// being a memory archive, not a review site). Beli's other big lever —
-// peer trust over anonymous reviews — doesn't translate here: this is a
-// solo planning tool with no social graph, so it's left out rather than
-// faked with fabricated "friends."
+// Keeps a Trip Journal of past results — one mechanic borrowed deliberately
+// from why Beli got trendy (research notes, not folklore): it frames each
+// result as a personal travel memory rather than a one-off lookup (Beli
+// succeeded partly by being a memory archive, not a review site). Beli's
+// other big lever — peer trust over anonymous reviews — doesn't translate
+// here: this is a solo planning tool with no social graph, so it's left
+// out rather than faked with fabricated "friends."
 //
 // The fit score is a transparent rule-based heuristic over each hotel's
 // own tags/tier (see data.js) — not a live AI/LLM call.
@@ -24,10 +22,9 @@ function loadState() {
     const parsed = raw ? JSON.parse(raw) : {};
     return {
       journal: parsed.journal || [],
-      streak: parsed.streak || { count: 0, lastDate: null },
     };
   } catch (e) {
-    return { journal: [], streak: { count: 0, lastDate: null } };
+    return { journal: [] };
   }
 }
 
@@ -106,21 +103,10 @@ function evaluateFit(hotel, themeKey) {
   return { score, reasons: reasons.slice(0, 4), verdict, color };
 }
 
-// ---------- streak + journal ----------
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
+// ---------- journal ----------
 
 function recordTripMatch(entry) {
   state.journal.unshift(entry);
-  const today = todayStr();
-  const last = state.streak.lastDate;
-  if (last !== today) {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    state.streak.count = last === yesterday ? state.streak.count + 1 : 1;
-    state.streak.lastDate = today;
-  }
   saveState();
 }
 
@@ -189,7 +175,7 @@ function render() {
       <div class="topbar-row">
         <div class="brand">🏨 Hotelify</div>
         <div class="header-right">
-          <button class="streak-badge" data-view-journal title="Your Trip Journal">🔥 ${state.streak.count}</button>
+          <button class="journal-badge" data-view-journal title="Your Trip Journal">📖 Journal</button>
         </div>
       </div>
     </header>
@@ -335,7 +321,7 @@ function renderAnswerStep() {
       <button class="pill-btn ghost" data-step="hotel">Try a different hotel</button>
       <button class="pill-btn" data-plan-new>Plan a new trip</button>
     </div>
-    <p class="rank-sub journal-note">Saved to your Trip Journal 🔥 ${state.streak.count}-day streak</p>
+    <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
 }
 
@@ -365,7 +351,6 @@ function renderJournal() {
   return `
     <button class="icon-btn back-btn" data-step="city">← Back</button>
     <h2 class="step-heading">Your Trip Journal</h2>
-    <p class="rank-sub">🔥 ${state.streak.count}-day streak — plan a trip today to keep it going.</p>
     <ul class="rank-list">${rows}</ul>
   `;
 }
@@ -373,9 +358,9 @@ function renderJournal() {
 // ---------- events ----------
 
 function bindEvents() {
-  const streakBtn = root.querySelector("[data-view-journal]");
-  if (streakBtn) {
-    streakBtn.addEventListener("click", () => {
+  const journalBtn = root.querySelector("[data-view-journal]");
+  if (journalBtn) {
+    journalBtn.addEventListener("click", () => {
       step = "journal";
       render();
     });
