@@ -58,6 +58,12 @@ body {
   flex-shrink: 0;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .journal-badge {
   background: var(--card);
   border: 1px solid var(--border);
@@ -343,6 +349,31 @@ main {
 
 #gemini-key-input {
   min-width: 0;
+}
+
+.plan-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  resize: vertical;
+  margin: 8px 0 10px;
+}
+
+.plan-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-card-text {
+  white-space: pre-wrap;
+  margin-top: 6px;
 }
 
 .share-section {

@@ -81,6 +81,49 @@ let aiPlanLoading = false;
 let aiPlanError = null;
 let tripNights = 2;
 
+// ---------- accounts (Supabase) ----------
+// Falls back to the existing guest/localStorage journal untouched when
+// config.js still has placeholder values (see auth.js).
+let currentUser = null;
+let journalSource = "guest"; // "guest" | "account"
+let authError = null;
+let authLoading = false;
+
+// Customer-written plans, shared publicly to the community feed.
+let userPlanText = "";
+let sharePlanLoading = false;
+let sharePlanError = null;
+let sharePlanSuccess = false;
+let communityPlans = [];
+let communityLoading = false;
+let communityError = null;
+
+async function initAuth() {
+  if (!isSupabaseConfigured()) return;
+  currentUser = await getCurrentUser();
+  if (currentUser) await loadAccountJournal();
+  render();
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    currentUser = session ? session.user : null;
+    if (currentUser) {
+      await loadAccountJournal();
+    } else {
+      journalSource = "guest";
+      state = loadState();
+    }
+    render();
+  });
+}
+
+async function loadAccountJournal() {
+  try {
+    state.journal = await fetchJournalEntries(currentUser.id);
+    journalSource = "account";
+  } catch (e) {
+    console.error("Failed to load account journal", e);
+  }
+}
+
 // ---------- data helpers ----------
 
 function uniqueCities() {
@@ -195,7 +238,13 @@ function evaluateFit(hotel, themeKey) {
 
 function recordTripMatch(entry) {
   state.journal.unshift(entry);
-  saveState();
+  if (journalSource === "account" && currentUser) {
+    insertJournalEntry(currentUser.id, entry).catch((e) => {
+      console.error("Failed to sync journal entry to account", e);
+    });
+  } else {
+    saveState();
+  }
 }
 
 // ---------- navigation ----------
@@ -220,9 +269,13 @@ function chooseHotel(hotel) {
   aiPlan = null;
   aiPlanError = null;
   tripNights = 2;
+  userPlanText = "";
+  sharePlanError = null;
+  sharePlanSuccess = false;
   const fit = evaluateFit(hotel, selectedTheme);
   recordTripMatch({
     id: "trip-" + Date.now(),
+    hotelId: hotel.id,
     city: hotel.city,
     hotelName: hotel.name,
     themeKey: selectedTheme,
@@ -244,7 +297,52 @@ function planNewTrip() {
   aiPlanError = null;
   aiPlanLoading = false;
   showKeyForm = false;
+  userPlanText = "";
+  sharePlanError = null;
+  sharePlanSuccess = false;
   step = "city";
+  render();
+}
+
+async function shareMyPlan() {
+  if (!currentUser) {
+    openAuthModal("signin");
+    return;
+  }
+  const text = userPlanText.trim();
+  if (!text) return;
+  sharePlanLoading = true;
+  sharePlanError = null;
+  render();
+  try {
+    const fit = evaluateFit(selectedHotel, selectedTheme);
+    const username = currentUser.user_metadata && currentUser.user_metadata.username ? currentUser.user_metadata.username : currentUser.email;
+    await sharePlanPublicly(currentUser.id, username, {
+      hotelName: selectedHotel.name,
+      city: selectedHotel.city,
+      themeKey: selectedTheme,
+      score: fit.score,
+      planText: text,
+    });
+    sharePlanSuccess = true;
+  } catch (e) {
+    sharePlanError = e.message || "Couldn't share your plan.";
+  }
+  sharePlanLoading = false;
+  render();
+}
+
+async function viewCommunity() {
+  step = "community";
+  communityLoading = true;
+  communityError = null;
+  render();
+  try {
+    communityPlans = await fetchPublicPlans(50);
+  } catch (e) {
+    communityError = e.message || "Couldn't load community plans.";
+  }
+  communityLoading = false;
   render();
 }
 
@@ -283,12 +381,23 @@ function timeAgo(ms) {
   return Math.round(hours / 24) + "d ago";
 }
 
+function renderAccountControl() {
+  if (!isSupabaseConfigured()) return "";
+  if (currentUser) {
+    const username = currentUser.user_metadata && currentUser.user_metadata.username ? currentUser.user_metadata.username : currentUser.email;
+    return `<button class="journal-badge" id="sign-out-btn" title="Sign out">👤 ${escapeHtml(username)}</button>`;
+  }
+  return `<button class="journal-badge" id="sign-in-btn">Sign In</button>`;
+}
+
 function render() {
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
         <button class="brand brand-btn" data-plan-new title="Start a new trip">${LOGO_SVG} Hotelify</button>
         <div class="header-right">
+          ${renderAccountControl()}
+          ${isSupabaseConfigured() ? `<button class="journal-badge" id="view-community-btn" title="Community Plans">🌍 Community</button>` : ""}
           <button class="journal-badge" data-view-journal title="Your Trip Journal">📖 Journal</button>
         </div>
       </div>
@@ -304,7 +413,34 @@ function renderStep() {
   if (step === "hotel") return renderHotelStep();
   if (step === "answer") return renderAnswerStep();
   if (step === "journal") return renderJournal();
+  if (step === "community") return renderCommunityStep();
   return "";
+}
+
+function renderCommunityStep() {
+  const header = `
+    <button class="icon-btn back-btn" data-step="city">← Back</button>
+    <h2 class="step-heading">Community Plans</h2>
+    <p class="rank-sub">Real itineraries written by other travelers.</p>
+  `;
+
+  if (communityLoading) return header + `<div class="empty">Loading…</div>`;
+  if (communityError) return header + `<div class="empty">${escapeHtml(communityError)}</div>`;
+  if (communityPlans.length === 0) return header + `<div class="empty">No shared plans yet — be the first!</div>`;
+
+  const cards = communityPlans
+    .map((p) => {
+      const theme = THEME_META[p.theme_key];
+      return `
+      <li class="plan-card">
+        <div class="rank-name">${theme ? theme.emoji : ""} ${escapeHtml(p.hotel_name)}</div>
+        <div class="rank-sub">${escapeHtml(p.city)} · by ${escapeHtml(p.username)} · ${p.score}% ${theme ? theme.label : ""} fit</div>
+        <p class="rank-sub plan-card-text">${escapeHtml(p.plan_text)}</p>
+      </li>`;
+    })
+    .join("");
+
+  return header + `<ul class="rank-list">${cards}</ul>`;
 }
 
 function renderCityStep() {
@@ -458,6 +594,7 @@ function renderAnswerStep() {
     ${links}
 
     ${planSection}
+    ${isSupabaseConfigured() ? renderWritePlanSection() : ""}
 
     <div class="detail-actions">
       <button class="pill-btn ghost" data-step="theme">Try a different theme</button>
@@ -465,6 +602,91 @@ function renderAnswerStep() {
     </div>
     <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
+}
+
+function renderWritePlanSection() {
+  if (sharePlanSuccess) {
+    return `
+    <div class="detail-section plan-section">
+      <div class="detail-label">✍️ Your Plan</div>
+      <p class="rank-sub">🎉 Shared with the community! Check the 🌍 Community tab.</p>
+    </div>`;
+  }
+
+  return `
+  <div class="detail-section plan-section">
+    <div class="detail-label">✍️ Write Your Own Plan</div>
+    <p class="rank-sub">Been here, or planned it yourself? Share real tips with other travelers.</p>
+    <textarea id="user-plan-textarea" class="plan-textarea" rows="5" placeholder="What would your itinerary here look like?">${escapeHtml(userPlanText)}</textarea>
+    ${sharePlanError ? `<p class="rank-sub plan-error">${escapeHtml(sharePlanError)}</p>` : ""}
+    <button class="pill-btn" id="share-plan-btn" ${sharePlanLoading ? "disabled" : ""}>${sharePlanLoading ? "Sharing…" : "🌍 Share with the Community"}</button>
+    ${!currentUser ? `<p class="rank-sub">Sign in to share your plan publicly.</p>` : ""}
+  </div>`;
+}
+
+// ---------- auth modal ----------
+
+function openAuthModal(initialMode) {
+  let mode = initialMode || "signin";
+
+  const overlay = document.createElement("div");
+  overlay.className = "share-modal-overlay";
+
+  function paint() {
+    overlay.innerHTML = `
+      <div class="share-modal">
+        <button class="icon-btn share-modal-close" id="auth-modal-close">✕ Close</button>
+        <h3 class="step-heading">${mode === "signin" ? "Sign In" : "Create Account"}</h3>
+        <form id="auth-form" class="custom-add" style="flex-direction:column; gap:10px;">
+          ${mode === "signup" ? `<input id="auth-username" type="text" placeholder="Username" required autocomplete="username" />` : ""}
+          <input id="auth-email" type="email" placeholder="Email" required autocomplete="email" />
+          <input id="auth-password" type="password" placeholder="Password" required autocomplete="${mode === "signin" ? "current-password" : "new-password"}" minlength="6" />
+          <button type="submit" class="pill-btn" ${authLoading ? "disabled" : ""}>${authLoading ? "Please wait…" : mode === "signin" ? "Sign In" : "Create Account"}</button>
+        </form>
+        ${authError ? `<p class="rank-sub plan-error">${escapeHtml(authError)}</p>` : ""}
+        <p class="rank-sub share-modal-note">
+          ${mode === "signin" ? "New here?" : "Already have an account?"}
+          <a href="#" id="auth-switch-mode">${mode === "signin" ? "Create an account" : "Sign in"}</a>
+        </p>
+      </div>
+    `;
+
+    document.getElementById("auth-modal-close").addEventListener("click", () => overlay.remove());
+    document.getElementById("auth-switch-mode").addEventListener("click", (e) => {
+      e.preventDefault();
+      mode = mode === "signin" ? "signup" : "signin";
+      authError = null;
+      paint();
+    });
+    document.getElementById("auth-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("auth-email").value.trim();
+      const password = document.getElementById("auth-password").value;
+      const username = mode === "signup" ? document.getElementById("auth-username").value.trim() : null;
+      authLoading = true;
+      authError = null;
+      paint();
+      try {
+        if (mode === "signup") {
+          await signUp(email, password, username);
+        } else {
+          await signIn(email, password);
+        }
+        authLoading = false;
+        overlay.remove();
+      } catch (err) {
+        authLoading = false;
+        authError = err.message || "Something went wrong.";
+        paint();
+      }
+    });
+  }
+
+  paint();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
 }
 
 // ---------- shareable match card ----------
@@ -775,9 +997,34 @@ function bindEvents() {
       aiPlan = null;
       aiPlanError = null;
       showKeyForm = false;
+      sharePlanError = null;
+      sharePlanSuccess = false;
       render();
     });
   });
+
+  const communityBtn = document.getElementById("view-community-btn");
+  if (communityBtn) communityBtn.addEventListener("click", viewCommunity);
+
+  const userPlanTextarea = document.getElementById("user-plan-textarea");
+  if (userPlanTextarea) {
+    userPlanTextarea.addEventListener("input", (e) => {
+      userPlanText = e.target.value;
+    });
+  }
+
+  const sharePlanBtn = document.getElementById("share-plan-btn");
+  if (sharePlanBtn) sharePlanBtn.addEventListener("click", shareMyPlan);
+
+  const signInBtn = document.getElementById("sign-in-btn");
+  if (signInBtn) signInBtn.addEventListener("click", () => openAuthModal("signin"));
+
+  const signOutBtn = document.getElementById("sign-out-btn");
+  if (signOutBtn) {
+    signOutBtn.addEventListener("click", async () => {
+      await signOut();
+    });
+  }
 
   const shareBtn = document.getElementById("share-match-btn");
   if (shareBtn) {
@@ -877,3 +1124,4 @@ function bindEvents() {
 }
 
 render();
+initAuth();
