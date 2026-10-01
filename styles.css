@@ -41,6 +41,13 @@ body {
 .brand {
   font-size: 22px;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.brand svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .journal-badge {

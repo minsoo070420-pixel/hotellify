@@ -16,6 +16,21 @@
 const STORAGE_KEY = "hotelify_tripmatch_v1";
 const THEME_KEYS = ["romantic", "family", "business", "adventure", "relaxation"];
 
+// Modern mark: a rounded-square badge in a green gradient with a simple
+// white house glyph, instead of the 🏨 emoji.
+const LOGO_SVG = `
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#34d399"/>
+        <stop offset="1" stop-color="#047857"/>
+      </linearGradient>
+    </defs>
+    <rect width="32" height="32" rx="9" fill="url(#logoGrad)"/>
+    <path d="M16 7.5L8 13.5V24C8 24.5523 8.44772 25 9 25H13V18H19V25H23C23.5523 25 24 24.5523 24 24V13.5L16 7.5Z" fill="white"/>
+  </svg>
+`;
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -174,7 +189,7 @@ function render() {
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
-        <div class="brand">🏨 Hotelify</div>
+        <div class="brand">${LOGO_SVG} Hotelify</div>
         <div class="header-right">
           <button class="journal-badge" data-view-journal title="Your Trip Journal">📖 Journal</button>
         </div>
