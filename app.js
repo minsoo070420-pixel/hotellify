@@ -234,6 +234,40 @@ function evaluateFit(hotel, themeKey) {
   return { score, reasons: reasons.slice(0, 4), verdict, color };
 }
 
+// ---------- badges ----------
+// Self-paced achievements computed from journal history — work the same
+// whether the journal is guest/localStorage or account-synced, since
+// they only read already-loaded `state.journal` fields.
+
+const BADGE_DEFS = [
+  { id: "first-trip", emoji: "🧳", label: "First Trip", description: "Matched your first hotel.", check: (s) => s.total >= 1 },
+  { id: "city-hopper", emoji: "🗺️", label: "City Hopper", description: "Matched hotels in 5+ cities.", check: (s) => s.cityCount >= 5 },
+  { id: "world-explorer", emoji: "🌍", label: "World Explorer", description: "Matched hotels in 15+ cities.", check: (s) => s.cityCount >= 15 },
+  { id: "perfect-match", emoji: "🎯", label: "Perfect Match", description: "Scored a 90%+ fit.", check: (s) => s.maxScore >= 90 },
+  { id: "romantic", emoji: "💕", label: "Hopeless Romantic", description: "3+ Romantic trip matches.", check: (s) => (s.themeCounts.romantic || 0) >= 3 },
+  { id: "family", emoji: "👨‍👩‍👧", label: "Family Planner", description: "3+ Family trip matches.", check: (s) => (s.themeCounts.family || 0) >= 3 },
+  { id: "business", emoji: "💼", label: "Road Warrior", description: "3+ Business trip matches.", check: (s) => (s.themeCounts.business || 0) >= 3 },
+  { id: "adventure", emoji: "🧗", label: "Thrill Seeker", description: "3+ Adventure trip matches.", check: (s) => (s.themeCounts.adventure || 0) >= 3 },
+  { id: "relaxation", emoji: "🧘", label: "Zen Master", description: "3+ Relaxation trip matches.", check: (s) => (s.themeCounts.relaxation || 0) >= 3 },
+  { id: "decade-club", emoji: "📅", label: "Decade Club", description: "10+ trips matched total.", check: (s) => s.total >= 10 },
+];
+
+function computeJournalStats(journal) {
+  const cities = new Set(journal.map((j) => j.city));
+  const themeCounts = {};
+  let maxScore = 0;
+  journal.forEach((j) => {
+    themeCounts[j.themeKey] = (themeCounts[j.themeKey] || 0) + 1;
+    if (j.score > maxScore) maxScore = j.score;
+  });
+  return { total: journal.length, cityCount: cities.size, themeCounts, maxScore };
+}
+
+function computeEarnedBadges(journal) {
+  const stats = computeJournalStats(journal);
+  return BADGE_DEFS.map((b) => ({ ...b, earned: b.check(stats) }));
+}
+
 // ---------- journal ----------
 
 function recordTripMatch(entry) {
@@ -828,6 +862,76 @@ function openShareModal(hotel, themeKey) {
   const canvas = buildShareCanvas(hotel, themeKey);
   const theme = THEME_META[themeKey];
   const fit = evaluateFit(hotel, themeKey);
+  openCanvasShareModal(canvas, {
+    altText: `Shareable match card for ${hotel.name}`,
+    filename: `hotelify-${slugify(hotel.name)}-${themeKey}.png`,
+    shareText: `My ${theme.label} trip match: ${hotel.name} (${fit.score}% fit)`,
+  });
+}
+
+function buildBadgeCanvas(badge) {
+  const W = 1080;
+  const H = 1920;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const font = (weight, size, style) => `${style ? style + " " : ""}${weight} ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, "#eaf4ec");
+  bgGrad.addColorStop(1, "#ffffff");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawShareLogo(ctx, 90, 115, 64);
+  ctx.fillStyle = "#1c1b19";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = font(700, 48);
+  ctx.fillText("Hotelify", 170, 147);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = font(600, 40);
+  ctx.fillStyle = "#7a756c";
+  ctx.fillText("🏅 Achievement Unlocked", W / 2, 560);
+
+  ctx.font = font(400, 260);
+  ctx.fillText(badge.emoji, W / 2, 820);
+
+  ctx.fillStyle = "#1c1b19";
+  ctx.font = font(700, 72);
+  wrapCenteredText(ctx, badge.label, W / 2, 940, 880, 84, 2);
+
+  ctx.font = font(400, 40);
+  ctx.fillStyle = "#7a756c";
+  wrapCenteredText(ctx, badge.description, W / 2, 1060, 760, 54, 3);
+
+  ctx.strokeStyle = "#e7e2da";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(90, H - 160);
+  ctx.lineTo(W - 90, H - 160);
+  ctx.stroke();
+
+  ctx.fillStyle = "#7a756c";
+  ctx.font = font(500, 34);
+  ctx.fillText("Earn your own badges at Hotelify", W / 2, H - 90);
+
+  return canvas;
+}
+
+function openBadgeShareModal(badge) {
+  const canvas = buildBadgeCanvas(badge);
+  openCanvasShareModal(canvas, {
+    altText: `${badge.label} badge`,
+    filename: `hotelify-badge-${badge.id}.png`,
+    shareText: `I just earned the "${badge.label}" badge on Hotelify! ${badge.emoji}`,
+  });
+}
+
+function openCanvasShareModal(canvas, { altText, filename, shareText }) {
   const dataUrl = canvas.toDataURL("image/png");
   const canShareNative = typeof navigator.share === "function";
 
@@ -836,7 +940,7 @@ function openShareModal(hotel, themeKey) {
   overlay.innerHTML = `
     <div class="share-modal">
       <button class="icon-btn share-modal-close" id="share-modal-close">✕ Close</button>
-      <div class="share-canvas-wrap"><img src="${dataUrl}" alt="Shareable match card for ${escapeHtml(hotel.name)}" /></div>
+      <div class="share-canvas-wrap"><img src="${dataUrl}" alt="${escapeHtml(altText)}" /></div>
       <div class="share-modal-actions">
         <button class="pill-btn" id="share-download-btn">⬇️ Download</button>
         ${canShareNative ? `<button class="pill-btn ghost" id="share-native-btn">📤 Share</button>` : ""}
@@ -858,7 +962,7 @@ function openShareModal(hotel, themeKey) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `hotelify-${slugify(hotel.name)}-${themeKey}.png`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -871,13 +975,9 @@ function openShareModal(hotel, themeKey) {
       canvas.toBlob(async (blob) => {
         if (!blob) return;
         try {
-          const file = new File([blob], `hotelify-${slugify(hotel.name)}.png`, { type: "image/png" });
+          const file = new File([blob], filename, { type: "image/png" });
           if (navigator.canShare && !navigator.canShare({ files: [file] })) return;
-          await navigator.share({
-            files: [file],
-            title: "Hotelify",
-            text: `My ${theme.label} trip match: ${hotel.name} (${fit.score}% fit)`,
-          });
+          await navigator.share({ files: [file], title: "Hotelify", text: shareText });
         } catch (e) {
           // Share sheet dismissed or unsupported — nothing to do.
         }
@@ -950,11 +1050,31 @@ function renderPlanSection() {
     </div>`;
 }
 
+function renderBadgesSection() {
+  const badges = computeEarnedBadges(state.journal);
+  const tiles = badges
+    .map(
+      (b) => `
+      <button class="badge-tile ${b.earned ? "badge-earned" : "badge-locked"}" ${b.earned ? `data-share-badge="${b.id}"` : "disabled"} title="${escapeHtml(b.description)}">
+        <div class="badge-tile-emoji">${b.earned ? b.emoji : "🔒"}</div>
+        <div class="badge-tile-label">${escapeHtml(b.label)}</div>
+      </button>`
+    )
+    .join("");
+  return `
+    <div class="badges-section">
+      <div class="detail-label">🏅 Badges</div>
+      <div class="badge-grid">${tiles}</div>
+    </div>`;
+}
+
 function renderJournal() {
+  const badgesSection = renderBadgesSection();
   if (state.journal.length === 0) {
     return `
       <button class="icon-btn back-btn" data-step="city">← Back</button>
       <h2 class="step-heading">Your Trip Journal</h2>
+      ${badgesSection}
       <div class="empty">No trips planned yet. Match your first hotel to start your journal.</div>
     `;
   }
@@ -976,6 +1096,7 @@ function renderJournal() {
   return `
     <button class="icon-btn back-btn" data-step="city">← Back</button>
     <h2 class="step-heading">Your Trip Journal</h2>
+    ${badgesSection}
     <ul class="rank-list">${rows}</ul>
   `;
 }
@@ -1025,6 +1146,13 @@ function bindEvents() {
       await signOut();
     });
   }
+
+  root.querySelectorAll("[data-share-badge]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const badge = BADGE_DEFS.find((b) => b.id === btn.dataset.shareBadge);
+      if (badge) openBadgeShareModal(badge);
+    });
+  });
 
   const shareBtn = document.getElementById("share-match-btn");
   if (shareBtn) {
