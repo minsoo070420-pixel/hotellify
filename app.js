@@ -194,13 +194,14 @@ async function callGemini(prompt) {
 
 // Reviews a customer-WRITTEN day-by-day stop list for logistics problems
 // (too much walking/backtracking, likely bad traffic between far-apart
-// stops, an overpacked or too-sparse day) — this app's only AI call.
+// stops, an overpacked or too-sparse day) and estimates calories burned
+// per day from the walking it implies — this app's only AI call.
 async function evaluateCustomItinerary(hotel, themeKey, days) {
   const theme = THEME_META[themeKey];
   const dayLines = days
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
-  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nEvaluate whether this plan is logistically realistic. Call out specific problems where they actually exist: too much walking or backtracking between stops, likely bad traffic or a long commute between stops that are far apart, a day with too many stops crammed in, or a day that's too sparse. If a day looks fine, say so briefly instead of inventing a problem. Only suggest concrete fixes (reordering stops, splitting a day) where there's a real issue. Keep it under 300 words, plain text, no markdown headers.`;
+  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nEvaluate whether this plan is logistically realistic. Call out specific problems where they actually exist: too much walking or backtracking between stops, likely bad traffic or a long commute between stops that are far apart, a day with too many stops crammed in, or a day that's too sparse. If a day looks fine, say so briefly instead of inventing a problem. Only suggest concrete fixes (reordering stops, splitting a day) where there's a real issue.\n\nThen, for EACH day, estimate the physical effort: approximate total walking distance (km) including walking between stops and around each stop, and the approximate calories burned (kcal) for an average adult, assuming they walk between nearby stops and use taxi/transit for far-apart ones. Put each day's estimate on its own line in the form "Day N: ~X km walking, ~Y kcal". Finish with one line "Total: ~Z kcal over N days". These are rough estimates, so say so briefly.\n\nKeep it under 400 words, plain text, no markdown headers.`;
   return callGemini(prompt);
 }
 
@@ -649,10 +650,6 @@ function renderAnswerStep() {
 
     <ul class="reasons-list">${reasonsList}</ul>
 
-    <div class="share-section">
-      <button class="pill-btn" id="share-match-btn">📤 Share Your Match</button>
-    </div>
-
     ${addressBlock}
     ${nearbyBlock}
     ${gettingThere}
@@ -718,7 +715,7 @@ function renderPlanCheckSection() {
   return `
   <div class="detail-section plan-section">
     <div class="detail-label">📍 Check My Plan</div>
-    <p class="rank-sub">Add the places you actually want to visit each day — AI checks whether it's realistic (too much walking, bad traffic, overpacked days).</p>
+    <p class="rank-sub">Add the places you actually want to visit each day — AI checks whether it's realistic (too much walking, bad traffic, overpacked days) and estimates the calories you'll burn each day.</p>
     ${dayBlocks}
     <button type="button" class="pill-btn ghost" id="add-day-btn">+ Add Day</button>
     <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking…" : "🔍 Check My Plan"}</button>
@@ -885,92 +882,6 @@ function drawShareLogo(ctx, x, y, size) {
   ctx.lineTo(24, 26);
   ctx.stroke();
   ctx.restore();
-}
-
-function buildShareCanvas(hotel, themeKey) {
-  const theme = THEME_META[themeKey];
-  const fit = evaluateFit(hotel, themeKey);
-  const W = 1080;
-  const H = 1920;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  const font = (weight, size, style) => `${style ? style + " " : ""}${weight} ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-
-  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-  bgGrad.addColorStop(0, "#eaf4ec");
-  bgGrad.addColorStop(1, "#ffffff");
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, W, H);
-
-  drawShareLogo(ctx, 90, 115, 64);
-  ctx.fillStyle = "#1c1b19";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = font(700, 48);
-  ctx.fillText("Hotelify", 170, 147);
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.font = font(400, 150);
-  ctx.fillText(theme.emoji, W / 2, 440);
-
-  ctx.font = font(600, 42);
-  ctx.fillStyle = "#7a756c";
-  ctx.fillText(`${theme.label} Trip`, W / 2, 510);
-
-  ctx.fillStyle = "#1c1b19";
-  ctx.font = font(700, 62);
-  const nameLines = wrapCenteredText(ctx, hotel.name, W / 2, 630, 880, 72, 3);
-
-  const subtitleY = 630 + nameLines * 72 + 36;
-  ctx.font = font(500, 38);
-  ctx.fillStyle = "#7a756c";
-  ctx.fillText(hotelSubtitle(hotel), W / 2, subtitleY);
-
-  const circleY = subtitleY + 190;
-  const circleR = 150;
-  ctx.beginPath();
-  ctx.arc(W / 2, circleY, circleR, 0, Math.PI * 2);
-  ctx.fillStyle = fit.color;
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  ctx.textBaseline = "middle";
-  ctx.font = font(700, 96);
-  ctx.fillText(`${fit.score}%`, W / 2, circleY - 8);
-  ctx.font = font(600, 32);
-  ctx.fillText(fit.verdict, W / 2, circleY + 76);
-
-  ctx.fillStyle = "#1c1b19";
-  ctx.textBaseline = "alphabetic";
-  ctx.font = font(400, 38, "italic");
-  const reasonY = circleY + circleR + 130;
-  wrapCenteredText(ctx, `"${fit.reasons[0]}"`, W / 2, reasonY, 820, 54, 3);
-
-  ctx.strokeStyle = "#e7e2da";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(90, H - 160);
-  ctx.lineTo(W - 90, H - 160);
-  ctx.stroke();
-
-  ctx.fillStyle = "#7a756c";
-  ctx.font = font(500, 34);
-  ctx.fillText("Find your own trip-fit match at Hotelify", W / 2, H - 90);
-
-  return canvas;
-}
-
-function openShareModal(hotel, themeKey) {
-  const canvas = buildShareCanvas(hotel, themeKey);
-  const theme = THEME_META[themeKey];
-  const fit = evaluateFit(hotel, themeKey);
-  openCanvasShareModal(canvas, {
-    altText: `Shareable match card for ${hotel.name}`,
-    filename: `hotelify-${slugify(hotel.name)}-${themeKey}.png`,
-    shareText: `My ${theme.label} trip match: ${hotel.name} (${fit.score}% fit)`,
-  });
 }
 
 function buildBadgeCanvas(badge) {
@@ -1192,11 +1103,6 @@ function bindEvents() {
       if (badge) openBadgeShareModal(badge);
     });
   });
-
-  const shareBtn = document.getElementById("share-match-btn");
-  if (shareBtn) {
-    shareBtn.addEventListener("click", () => openShareModal(selectedHotel, selectedTheme));
-  }
 
   const planNewBtn = root.querySelector("[data-plan-new]");
   if (planNewBtn) planNewBtn.addEventListener("click", planNewTrip);

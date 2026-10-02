@@ -458,13 +458,6 @@ main {
   margin-top: 6px;
 }
 
-.share-section {
-  margin: 20px 0;
-}
-.share-section .pill-btn {
-  width: 100%;
-}
-
 .share-modal-overlay {
   position: fixed;
   inset: 0;

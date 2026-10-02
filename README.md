@@ -36,7 +36,6 @@ The answer screen also shows:
 - **Getting there from the airport** — live Google Maps transit and driving directions, not an invented fare/time.
 - **Book on Official Site** — links straight to the hotel's real website when one is on file; falls back to a general search only for hotels with no known site (e.g. ones you typed in manually).
 - **✨ Plan the Trip** — an optional AI-generated itinerary (see below).
-- **📤 Share Your Match** — generates a shareable image card (score, hotel, theme, top reason) rendered client-side on a `<canvas>`, sized for Instagram Stories/TikTok. Download it or use your device's native share sheet. No backend or image API involved — everything is drawn in-browser.
 
 ## AI Trip Plan (Gemini)
 
