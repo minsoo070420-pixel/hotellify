@@ -356,12 +356,25 @@ main {
 }
 
 .plan-check-day {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
   margin: 18px 0;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+
+.plan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 18px;
+  align-items: center;
+  margin: 6px 0;
+}
+.plan-leg-row {
+  margin: 0;
+}
+.plan-leg {
+  color: var(--muted);
+  font-size: 13px;
+  padding-left: 10px;
 }
 
 .plan-day-label {
@@ -384,11 +397,38 @@ main {
 }
 
 .feedback-card {
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: 12px;
+  padding: 8px 12px;
   border: 2px solid var(--border);
   background: var(--card);
-  height: 100%;
+}
+.feedback-leg {
+  border-width: 1px;
+  border-style: dashed;
+  padding: 6px 12px;
+}
+.feedback-day {
+  padding: 6px 12px;
+}
+.kw-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.kw-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid currentColor;
+}
+.plan-summary .kw-chip {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--border);
+  margin-bottom: 8px;
 }
 .feedback-pending {
   color: var(--muted);
@@ -438,9 +478,9 @@ main {
 }
 
 @media (max-width: 700px) {
-  .plan-check-day {
+  .plan-row {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 6px;
   }
 }
 

@@ -213,7 +213,7 @@ async function evaluateCustomItinerary(hotel, themeKey, days) {
   const dayLines = days
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
-  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nEvaluate whether this plan is logistically realistic. Call out specific problems where they actually exist: too much walking or backtracking between stops, likely bad traffic or a long commute between stops that are far apart, a day with too many stops crammed in, or a day that's too sparse. If a day looks fine, say so briefly instead of inventing a problem. Only suggest concrete fixes (reordering stops, splitting a day) where there's a real issue.\n\nFor EACH day also estimate the physical effort: approximate walking distance (km) including walking between stops and around each stop, and approximate calories burned (kcal) for an average adult, assuming they walk between nearby stops and use taxi/transit for far-apart ones. These are rough estimates.\n\nRespond with ONLY a JSON object, exactly this shape, with one entry in "days" per day in order (${days.length} total):\n{"days":[{"verdict":"good" or "review","feedback":"1-3 sentences, specific","walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","totalKcal":number}\nUse "good" when the day is realistic as written; use "review" when it's worth looking at again (too much walking, bad traffic, overpacked, etc.). Keep each feedback under 60 words.`;
+  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, walking vs taxi/transit, and likely traffic.\n- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use taxi/transit for far-apart ones (rough estimates).\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, take a taxi). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"..."}],"walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
   const text = await callGemini(prompt, { json: true });
   try {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -366,9 +366,20 @@ function formatPlanCheckForSharing() {
   if (planCheckResult && planCheckResult.raw) {
     aiCheck = planCheckResult.raw.trim();
   } else if (planCheckResult) {
+    const tag = (v) => (v === "good" ? "looks good" : "worth another look");
     aiCheck = planCheckResult.days
-      .map((d, i) => `Day ${i + 1} (${d.verdict === "good" ? "looks good" : "worth another look"}): ${d.feedback} ~${d.walkingKm} km, ~${d.kcal} kcal`)
+      .map((d, i) => {
+        const lines = [`Day ${i + 1} (~${d.walkingKm} km, ~${d.kcal} kcal)`];
+        (d.stops || []).forEach((st, si) => {
+          const kw = st.keywords && st.keywords.length ? ` [${st.keywords.join(", ")}]` : "";
+          lines.push(`  ${planCheckDays[i] ? planCheckDays[i][si] : "Stop"}${kw} - ${tag(st.verdict)}: ${st.feedback}`);
+          const leg = (d.legs || [])[si];
+          if (leg && si < (d.stops || []).length - 1) lines.push(`    -> next: ${tag(leg.verdict)}: ${leg.feedback}`);
+        });
+        return lines.join("\n");
+      })
       .join("\n");
+    if (planCheckResult.keywords && planCheckResult.keywords.length) aiCheck += `\nPlan vibe: ${planCheckResult.keywords.join(", ")}`;
     if (planCheckResult.summary) aiCheck += `\n${planCheckResult.summary}`;
     if (planCheckResult.totalKcal) aiCheck += `\nTotal: ~${planCheckResult.totalKcal} kcal`;
   }
@@ -697,38 +708,64 @@ function renderAnswerStep() {
 function renderPlanCheckSection() {
   const structured = planCheckResult && !planCheckResult.raw ? planCheckResult : null;
 
-  const feedbackCell = (i) => {
-    if (planCheckLoading) return `<div class="feedback-card feedback-pending">Checking…</div>`;
-    const d = structured && structured.days[i];
-    if (!d) return `<div class="feedback-card feedback-pending">Feedback appears here after you check your plan.</div>`;
-    const good = d.verdict === "good";
-    return `
-      <div class="feedback-card ${good ? "feedback-good" : "feedback-review"}">
-        <div class="feedback-verdict">${good ? "✅ Looks good" : "⚠️ Maybe look at this again"}</div>
-        <div class="feedback-text">${escapeHtml(d.feedback || "")}</div>
-        <div class="feedback-stats">~${escapeHtml(String(d.walkingKm))} km walking · ~${escapeHtml(String(d.kcal))} kcal</div>
-      </div>`;
-  };
+  const verdictClass = (v) => (v === "good" ? "feedback-good" : "feedback-review");
+  const keywordChips = (kws) =>
+    kws && kws.length ? `<div class="kw-row">${kws.map((k) => `<span class="kw-chip">${escapeHtml(String(k))}</span>`).join("")}</div>` : "";
+
+  const stopFeedback = (st) =>
+    st
+      ? `<div class="feedback-card ${verdictClass(st.verdict)}">
+          <div class="feedback-text">${st.verdict === "good" ? "✅" : "⚠️"} ${escapeHtml(st.feedback || "")}</div>
+          ${keywordChips(st.keywords)}
+        </div>`
+      : "";
+
+  const legFeedback = (leg) =>
+    leg ? `<div class="feedback-card feedback-leg ${verdictClass(leg.verdict)}"><div class="feedback-text">${leg.verdict === "good" ? "✅" : "⚠️"} ${escapeHtml(leg.feedback || "")}</div></div>` : "";
 
   const dayBlocks = planCheckDays
     .map((stops, i) => {
-      const stopChips = stops.length
-        ? `<div class="stop-chip-row">${stops
-            .map((s, si) => `<span class="stop-chip">${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span>`)
-            .join("")}</div>`
-        : `<p class="rank-sub">No stops added yet.</p>`;
+      const dr = structured && structured.days[i];
       const removeBtn = planCheckDays.length > 1 ? `<button type="button" class="icon-btn" data-remove-day="${i}">Remove day</button>` : "";
+
+      const rows = stops
+        .map((s, si) => {
+          const stopRow = `
+          <div class="plan-row">
+            <div class="plan-col"><span class="stop-chip">${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span></div>
+            <div class="feedback-col">${planCheckLoading ? "" : stopFeedback(dr && dr.stops && dr.stops[si])}</div>
+          </div>`;
+          const hasNext = si < stops.length - 1;
+          const legRow = hasNext
+            ? `
+          <div class="plan-row plan-leg-row">
+            <div class="plan-col plan-leg">↓ ${escapeHtml(s)} → ${escapeHtml(stops[si + 1])}</div>
+            <div class="feedback-col">${planCheckLoading ? "" : legFeedback(dr && dr.legs && dr.legs[si])}</div>
+          </div>`
+            : "";
+          return stopRow + legRow;
+        })
+        .join("");
+
+      const dayAnyReview = dr && [...(dr.stops || []), ...(dr.legs || [])].some((x) => x && x.verdict !== "good");
+      const dayStats =
+        dr && !planCheckLoading
+          ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal</div></div>`
+          : "";
+
       return `
       <div class="plan-check-day">
-        <div class="plan-col">
-          <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
-          ${stopChips}
-          <form class="custom-add" data-add-stop-form="${i}">
-            <input type="text" placeholder="Add a place (e.g. Eiffel Tower)" />
-            <button type="submit" class="pill-btn ghost">Add</button>
-          </form>
+        <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
+        ${stops.length ? rows : `<p class="rank-sub">No stops added yet.</p>`}
+        <div class="plan-row">
+          <div class="plan-col">
+            <form class="custom-add" data-add-stop-form="${i}">
+              <input type="text" placeholder="Add a place (e.g. Eiffel Tower)" />
+              <button type="submit" class="pill-btn ghost">Add</button>
+            </form>
+          </div>
+          <div class="feedback-col">${dayStats}</div>
         </div>
-        <div class="feedback-col">${feedbackCell(i)}</div>
       </div>`;
     })
     .join("");
@@ -743,6 +780,7 @@ function renderPlanCheckSection() {
   } else if (structured && !planCheckLoading) {
     resultBlock = `
       <div class="plan-summary">
+        ${keywordChips(structured.keywords)}
         ${structured.summary ? `<div>${escapeHtml(structured.summary)}</div>` : ""}
         ${structured.totalKcal ? `<div class="plan-summary-total">Total: ~${escapeHtml(String(structured.totalKcal))} kcal over ${planCheckDays.length} day${planCheckDays.length > 1 ? "s" : ""} (rough estimate)</div>` : ""}
       </div>`;
