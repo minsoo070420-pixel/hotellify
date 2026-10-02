@@ -120,3 +120,43 @@ create policy "Users can share their own plans"
 create policy "Users can delete their own shared plans"
   on public.shared_plans for delete
   using (auth.uid() = user_id);
+
+-- Likes/dislikes and comments on shared plans (added after the initial
+-- schema; safe to run on its own in the SQL Editor if the tables above
+-- already exist).
+create table if not exists public.plan_votes (
+  plan_id uuid not null references public.shared_plans(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  vote smallint not null check (vote in (1, -1)),
+  created_at timestamptz not null default now(),
+  primary key (plan_id, user_id)
+);
+
+alter table public.plan_votes enable row level security;
+
+create policy "Votes are viewable by everyone"
+  on public.plan_votes for select using (true);
+create policy "Users can vote as themselves"
+  on public.plan_votes for insert with check (auth.uid() = user_id);
+create policy "Users can change their own vote"
+  on public.plan_votes for update using (auth.uid() = user_id);
+create policy "Users can remove their own vote"
+  on public.plan_votes for delete using (auth.uid() = user_id);
+
+create table if not exists public.plan_comments (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references public.shared_plans(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  username text not null,
+  body text not null check (char_length(body) between 1 and 1000),
+  created_at timestamptz not null default now()
+);
+
+alter table public.plan_comments enable row level security;
+
+create policy "Comments are viewable by everyone"
+  on public.plan_comments for select using (true);
+create policy "Users can comment as themselves"
+  on public.plan_comments for insert with check (auth.uid() = user_id);
+create policy "Users can delete their own comments"
+  on public.plan_comments for delete using (auth.uid() = user_id);

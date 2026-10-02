@@ -95,3 +95,41 @@ async function fetchPublicPlans(limit) {
   if (error) throw error;
   return data;
 }
+
+async function fetchPlanEngagement(planIds) {
+  if (!planIds.length) return { votes: [], comments: [] };
+  const [votesRes, commentsRes] = await Promise.all([
+    supabaseClient.from("plan_votes").select("plan_id, user_id, vote").in("plan_id", planIds),
+    supabaseClient.from("plan_comments").select("*").in("plan_id", planIds).order("created_at", { ascending: true }),
+  ]);
+  if (votesRes.error) throw votesRes.error;
+  if (commentsRes.error) throw commentsRes.error;
+  return { votes: votesRes.data, comments: commentsRes.data };
+}
+
+async function setPlanVote(userId, planId, vote) {
+  const { error } = await supabaseClient
+    .from("plan_votes")
+    .upsert({ plan_id: planId, user_id: userId, vote }, { onConflict: "plan_id,user_id" });
+  if (error) throw error;
+}
+
+async function clearPlanVote(userId, planId) {
+  const { error } = await supabaseClient.from("plan_votes").delete().eq("plan_id", planId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+async function addPlanComment(userId, username, planId, body) {
+  const { data, error } = await supabaseClient
+    .from("plan_comments")
+    .insert({ plan_id: planId, user_id: userId, username, body })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function deletePlanComment(commentId) {
+  const { error } = await supabaseClient.from("plan_comments").delete().eq("id", commentId);
+  if (error) throw error;
+}

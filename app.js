@@ -94,6 +94,11 @@ let sharePlanSuccess = false;
 let communityPlans = [];
 let communityLoading = false;
 let communityError = null;
+let communityEngagementError = null;
+let planVotes = {}; // planId -> { up, down, mine: 1 | -1 | 0 }
+let planComments = {}; // planId -> [comment rows]
+let expandedComments = new Set();
+let commentDrafts = {};
 
 async function initAuth() {
   if (!isSupabaseConfigured()) return;
@@ -429,6 +434,84 @@ async function viewCommunity() {
   }
   communityLoading = false;
   render();
+  await loadEngagement();
+}
+
+async function loadEngagement() {
+  communityEngagementError = null;
+  try {
+    const { votes, comments } = await fetchPlanEngagement(communityPlans.map((p) => p.id));
+    planVotes = {};
+    planComments = {};
+    communityPlans.forEach((p) => {
+      planVotes[p.id] = { up: 0, down: 0, mine: 0 };
+      planComments[p.id] = [];
+    });
+    votes.forEach((v) => {
+      const t = planVotes[v.plan_id];
+      if (!t) return;
+      if (v.vote === 1) t.up++;
+      else t.down++;
+      if (currentUser && v.user_id === currentUser.id) t.mine = v.vote;
+    });
+    comments.forEach((c) => {
+      if (planComments[c.plan_id]) planComments[c.plan_id].push(c);
+    });
+  } catch (e) {
+    communityEngagementError = "Likes and comments aren't set up yet — run the latest supabase/schema.sql in your Supabase SQL Editor.";
+  }
+  render();
+}
+
+async function voteOnPlan(planId, vote) {
+  if (!currentUser) {
+    openAuthModal("signin");
+    return;
+  }
+  const t = planVotes[planId] || (planVotes[planId] = { up: 0, down: 0, mine: 0 });
+  const prev = t.mine;
+  if (prev === 1) t.up--;
+  if (prev === -1) t.down--;
+  t.mine = prev === vote ? 0 : vote;
+  if (t.mine === 1) t.up++;
+  if (t.mine === -1) t.down++;
+  render();
+  try {
+    if (t.mine === 0) await clearPlanVote(currentUser.id, planId);
+    else await setPlanVote(currentUser.id, planId, t.mine);
+  } catch (e) {
+    await loadEngagement();
+  }
+}
+
+async function postComment(planId) {
+  if (!currentUser) {
+    openAuthModal("signin");
+    return;
+  }
+  const body = (commentDrafts[planId] || "").trim();
+  if (!body) return;
+  const username = currentUser.user_metadata && currentUser.user_metadata.username ? currentUser.user_metadata.username : currentUser.email;
+  try {
+    const row = await addPlanComment(currentUser.id, username, planId, body);
+    (planComments[planId] = planComments[planId] || []).push(row);
+    commentDrafts[planId] = "";
+    render();
+  } catch (e) {
+    communityEngagementError = e.message || "Couldn't post your comment.";
+    render();
+  }
+}
+
+async function removeComment(planId, commentId) {
+  try {
+    await deletePlanComment(commentId);
+    planComments[planId] = (planComments[planId] || []).filter((c) => c.id !== commentId);
+    render();
+  } catch (e) {
+    communityEngagementError = e.message || "Couldn't delete the comment.";
+    render();
+  }
 }
 
 function addPlanCheckStop(dayIndex, stop) {
@@ -539,16 +622,47 @@ function renderCommunityStep() {
   const cards = communityPlans
     .map((p) => {
       const theme = THEME_META[p.theme_key];
+      const v = planVotes[p.id] || { up: 0, down: 0, mine: 0 };
+      const comments = planComments[p.id] || [];
+      const open = expandedComments.has(p.id);
+      const commentList = comments
+        .map(
+          (c) => `
+          <div class="comment-row">
+            <div><strong>${escapeHtml(c.username)}</strong> <span class="rank-sub">· ${timeAgo(new Date(c.created_at).getTime())}</span>
+              ${currentUser && c.user_id === currentUser.id ? `<button type="button" class="icon-btn comment-delete" data-delete-comment="${p.id}|${c.id}">Delete</button>` : ""}
+            </div>
+            <div class="comment-body">${escapeHtml(c.body)}</div>
+          </div>`
+        )
+        .join("");
+      const commentBox = open
+        ? `
+        <div class="comments-box">
+          ${commentList || `<p class="rank-sub">No comments yet.</p>`}
+          <form class="custom-add" data-comment-form="${p.id}">
+            <input type="text" maxlength="1000" placeholder="${currentUser ? "Add a comment…" : "Sign in to comment"}" value="${escapeHtml(commentDrafts[p.id] || "")}" data-comment-input="${p.id}" />
+            <button type="submit" class="pill-btn ghost">Post</button>
+          </form>
+        </div>`
+        : "";
       return `
       <li class="plan-card">
         <div class="rank-name">${theme ? theme.emoji : ""} ${escapeHtml(p.hotel_name)}</div>
         <div class="rank-sub">${escapeHtml(p.city)} · by ${escapeHtml(p.username)} · ${p.score}% ${theme ? theme.label : ""} fit</div>
         <p class="rank-sub plan-card-text">${escapeHtml(p.plan_text)}</p>
+        <div class="engage-row">
+          <button type="button" class="engage-btn ${v.mine === 1 ? "engage-active-up" : ""}" data-vote="${p.id}|1">👍 ${v.up}</button>
+          <button type="button" class="engage-btn ${v.mine === -1 ? "engage-active-down" : ""}" data-vote="${p.id}|-1">👎 ${v.down}</button>
+          <button type="button" class="engage-btn" data-toggle-comments="${p.id}">💬 ${comments.length}</button>
+        </div>
+        ${commentBox}
       </li>`;
     })
     .join("");
 
-  return header + `<ul class="rank-list">${cards}</ul>`;
+  const engageNote = communityEngagementError ? `<p class="rank-sub plan-error">${escapeHtml(communityEngagementError)}</p>` : "";
+  return header + engageNote + `<ul class="rank-list">${cards}</ul>`;
 }
 
 function renderCityStep() {
@@ -1160,6 +1274,38 @@ function bindEvents() {
       sharePlanSuccess = false;
       planCheckError = null;
       render();
+    });
+  });
+
+  root.querySelectorAll("[data-vote]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [planId, vote] = btn.dataset.vote.split("|");
+      voteOnPlan(planId, Number(vote));
+    });
+  });
+  root.querySelectorAll("[data-toggle-comments]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.toggleComments;
+      if (expandedComments.has(id)) expandedComments.delete(id);
+      else expandedComments.add(id);
+      render();
+    });
+  });
+  root.querySelectorAll("[data-comment-input]").forEach((input) => {
+    input.addEventListener("input", (e) => {
+      commentDrafts[input.dataset.commentInput] = e.target.value;
+    });
+  });
+  root.querySelectorAll("[data-comment-form]").forEach((form) => {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      postComment(form.dataset.commentForm);
+    });
+  });
+  root.querySelectorAll("[data-delete-comment]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [planId, commentId] = btn.dataset.deleteComment.split("|");
+      removeComment(planId, commentId);
     });
   });
 

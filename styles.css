@@ -575,6 +575,52 @@ main {
   gap: 4px;
 }
 
+.engage-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.engage-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.engage-btn:hover {
+  border-color: var(--ink);
+}
+.engage-active-up {
+  background: #e8f6ee;
+  border-color: #2e7d4f;
+  color: #1d5a37;
+}
+.engage-active-down {
+  background: #fdecea;
+  border-color: #c0392b;
+  color: #8e2a1f;
+}
+.comments-box {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.comment-row {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+.comment-body {
+  white-space: pre-wrap;
+  margin-top: 2px;
+}
+.comment-delete {
+  font-size: 12px;
+  margin-left: 6px;
+}
+
 .plan-card-text {
   white-space: pre-wrap;
   margin-top: 6px;
