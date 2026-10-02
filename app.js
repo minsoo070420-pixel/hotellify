@@ -171,25 +171,35 @@ function clearGeminiKey() {
   localStorage.removeItem(GEMINI_KEY_STORAGE);
 }
 
+// Newest model first; falls through to older Flash models when Google
+// answers 503 (overloaded) or 429 (rate-limited) for the current one.
+const GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+
 async function callGemini(prompt) {
   const key = getGeminiKey();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-  });
+  let lastError = null;
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const msg = body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`;
-    throw new Error(msg);
+  for (const model of GEMINI_FALLBACK_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      lastError = new Error(body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`);
+      if (res.status === 503 || res.status === 429) continue;
+      throw lastError;
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+    if (!text) throw new Error("The AI returned an empty response.");
+    return text.trim();
   }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
-  if (!text) throw new Error("The AI returned an empty response.");
-  return text.trim();
+  throw lastError;
 }
 
 // Reviews a customer-WRITTEN day-by-day stop list for logistics problems
