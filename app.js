@@ -62,6 +62,10 @@ let showCustomHotelForm = false;
 let showAllCities = false;
 let answerTab = "hotel"; // hotel | plan
 let shareOpen = false;
+let suggestedPlaces = null; // null = the hotel's own nearby list
+let suggestionsLoading = false;
+let suggestionsError = null;
+let seenSuggestions = new Set();
 
 // AI plan check (Gemini) — the only place this app calls an LLM. The API
 // key lives ONLY in localStorage, entered by the user at runtime in this
@@ -329,6 +333,7 @@ function chooseTheme(themeKey) {
 
 function chooseHotel(hotel) {
   selectedHotel = hotel;
+  resetSuggestions();
   answerTab = "hotel";
   shareOpen = false;
   sharePlanError = null;
@@ -353,6 +358,7 @@ function chooseHotel(hotel) {
 }
 
 function planNewTrip() {
+  resetSuggestions();
   answerTab = "hotel";
   shareOpen = false;
   showAllCities = false;
@@ -522,6 +528,46 @@ async function removeComment(planId, commentId) {
     communityEngagementError = e.message || "Couldn't delete the comment.";
     render();
   }
+}
+
+function resetSuggestions() {
+  suggestedPlaces = null;
+  suggestionsLoading = false;
+  suggestionsError = null;
+  seenSuggestions = new Set();
+}
+
+function currentSuggestions() {
+  return suggestedPlaces || (selectedHotel && selectedHotel.nearby) || [];
+}
+
+// Asks the AI for fresh places to visit around the hotel, skipping ones
+// already shown or already in the plan. Part of the plan-building tab.
+async function refreshSuggestions() {
+  if (!getGeminiKey()) {
+    openApiKeyModal(refreshSuggestions);
+    return;
+  }
+  currentSuggestions().forEach((n) => seenSuggestions.add(n.trim().toLowerCase()));
+  planCheckDays.flat().forEach((n) => seenSuggestions.add(n.trim().toLowerCase()));
+  suggestionsLoading = true;
+  suggestionsError = null;
+  render();
+  try {
+    const theme = THEME_META[selectedTheme];
+    const exclude = [...seenSuggestions].join("; ");
+    const prompt = `Suggest 6 places for a traveler to visit near ${selectedHotel.name} in ${selectedHotel.city}${selectedHotel.country ? ", " + selectedHotel.country : ""}, for a ${theme.label}-themed trip. Mix well-known landmarks with food, culture or activities, all within roughly 30 minutes of the hotel. Use short, commonly recognized names (no descriptions). Do NOT include any of these: ${exclude || "(none)"}.\nRespond with ONLY a JSON array of 6 strings.`;
+    const text = await callGemini(prompt, { json: true });
+    const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+    const list = (Array.isArray(parsed) ? parsed : parsed && parsed.places) || [];
+    const clean = list.map((x) => String(x).trim()).filter((x) => x && !seenSuggestions.has(x.toLowerCase())).slice(0, 6);
+    if (!clean.length) throw new Error("No new ideas came back. Try again.");
+    suggestedPlaces = clean;
+  } catch (e) {
+    suggestionsError = e.message || "Couldn't get new ideas.";
+  }
+  suggestionsLoading = false;
+  render();
 }
 
 function addPlanCheckStop(dayIndex, stop) {
@@ -898,14 +944,14 @@ function renderAnswerStep() {
 }
 
 function quickAddChips(dayIndex, stops) {
-  const nearby = (selectedHotel && selectedHotel.nearby) || [];
   const used = new Set(stops.map((x) => x.trim().toLowerCase()));
-  const chips = nearby
+  const chips = currentSuggestions()
     .map((name, ni) => ({ name, ni }))
     .filter(({ name }) => !used.has(name.trim().toLowerCase()))
     .map(({ name, ni }) => `<button type="button" class="chip quick-chip" data-quick-add="${dayIndex}|${ni}">+ ${escapeHtml(name)}</button>`)
     .join("");
-  return chips ? `<div class="quick-add"><div class="rank-sub">Tap to add a place near your hotel:</div><div class="chip-row">${chips}</div></div>` : "";
+  const refresh = `<button type="button" class="chip quick-chip refresh-chip" data-refresh-suggestions ${suggestionsLoading ? "disabled" : ""}>${suggestionsLoading ? "Finding…" : "🔄 More ideas"}</button>`;
+  return `<div class="quick-add"><div class="rank-sub">Tap to add a place near you:</div><div class="chip-row">${chips}${refresh}</div>${suggestionsError ? `<p class="rank-sub plan-error">${escapeHtml(suggestionsError)}</p>` : ""}</div>`;
 }
 
 function renderPlanCheckSection() {
@@ -1501,9 +1547,13 @@ function bindEvents() {
   root.querySelectorAll("[data-quick-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const [d, ni] = btn.dataset.quickAdd.split("|").map(Number);
-      const name = selectedHotel.nearby[ni];
+      const name = currentSuggestions()[ni];
       if (name) addPlanCheckStop(d, name);
     });
+  });
+
+  root.querySelectorAll("[data-refresh-suggestions]").forEach((btn) => {
+    btn.addEventListener("click", refreshSuggestions);
   });
 
   const shareDetails = root.querySelector("[data-share-details]");
