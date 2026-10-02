@@ -183,37 +183,113 @@ function clearGeminiKey() {
   localStorage.removeItem(GEMINI_KEY_STORAGE);
 }
 
-// Newest model first; falls through to older Flash models when Google
-// answers 503 (overloaded) or 429 (rate-limited) for the current one.
-const GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+// Static order used if the model list can't be fetched.
+const GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+let discoveredModels = null;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function modelRank(name) {
+  const m = name.match(/gemini-(\d+(?:\.\d+)?)-flash(-lite)?/);
+  if (!m) return -1;
+  return parseFloat(m[1]) * 10 - (m[2] ? 0.5 : 0);
+}
+
+// Asks Google which models this key can actually call, so the app tries
+// real models (newest first, lite variants after full ones) instead of
+// guessing names. Cached for the page session.
+async function getCandidateModels(key) {
+  if (discoveredModels) return discoveredModels;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    if (res.ok) {
+      const data = await res.json();
+      const names = (data.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => m.name.replace(/^models\//, ""))
+        .filter((n) => /^gemini-\d+(\.\d+)?-flash(-lite)?$/.test(n))
+        .sort((a, b) => modelRank(b) - modelRank(a));
+      if (names.length) return (discoveredModels = names.slice(0, 6));
+    }
+  } catch (e) {
+    // fall back to the static list
+  }
+  return GEMINI_FALLBACK_MODELS;
+}
+
+// One request to one model. Rejects with err.status set on failure.
+async function requestModel(model, key, payload) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const err = new Error(body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+  if (!text) throw new Error("The AI returned an empty response.");
+  return text.trim();
+}
+
+// Starts the first model right away and the next ones every couple of
+// seconds without waiting for the earlier ones to fail; the first success
+// wins. Overloaded models are slow to say no, so this is much faster than
+// trying them one after another.
+function raceModels(models, key, payload) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    let failures = 0;
+    let overloadError = null;
+    let otherError = null;
+    models.forEach((model, i) => {
+      sleep(i * 1500)
+        .then(() => (done ? null : requestModel(model, key, payload)))
+        .then((text) => {
+          if (text && !done) {
+            done = true;
+            resolve(text);
+          }
+        })
+        .catch((err) => {
+          if (done) return;
+          if ([401, 403].includes(err.status)) {
+            done = true;
+            reject(err);
+            return;
+          }
+          if ([503, 429, 404].includes(err.status)) overloadError = overloadError || err;
+          else otherError = otherError || err;
+          if (++failures === models.length) {
+            done = true;
+            reject(overloadError && !otherError ? Object.assign(new Error("overloaded"), { status: 503 }) : otherError || overloadError);
+          }
+        });
+    });
+  });
+}
 
 async function callGemini(prompt, { json = false } = {}) {
   const key = getGeminiKey();
-  let lastError = null;
   const payload = { contents: [{ parts: [{ text: prompt }] }] };
   if (json) payload.generationConfig = { responseMimeType: "application/json" };
+  const models = await getCandidateModels(key);
 
-  for (const model of GEMINI_FALLBACK_MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      lastError = new Error(body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`);
-      if (res.status === 503 || res.status === 429) continue;
-      throw lastError;
+  // Two rounds: if every model is overloaded, pause briefly and try again.
+  for (let round = 0; round < 2; round++) {
+    try {
+      return await raceModels(models, key, payload);
+    } catch (err) {
+      if (err.status !== 503) throw err;
+      if (round === 0) await sleep(3000);
     }
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
-    if (!text) throw new Error("The AI returned an empty response.");
-    return text.trim();
   }
-  throw lastError;
+  throw new Error("Google's AI is very busy right now, and every model we tried was overloaded. Please try again in a minute.");
 }
 
 // Reviews a customer-WRITTEN day-by-day stop list for logistics problems
@@ -1081,7 +1157,7 @@ function renderPlanCheckSection() {
     <p class="rank-sub">Add the places you want to visit each day, then tap Check My Plan. You'll get feedback on every stop and the order, plus walking and calories.</p>
     ${dayBlocks}
     <button type="button" class="pill-btn ghost" id="add-day-btn">+ Add Day</button>
-    <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking… (can take up to 30s)" : "🔍 Check My Plan"}</button>
+    <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking… (this can take a little while)" : "🔍 Check My Plan"}</button>
     ${resultBlock}
     ${shareBlock}
   </div>`;
