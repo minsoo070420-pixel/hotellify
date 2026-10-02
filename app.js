@@ -218,7 +218,8 @@ async function evaluateCustomItinerary(hotel, themeKey, days) {
   const dayLines = days
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
-  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, the best way to get between the two stops, and likely traffic. Do NOT default to taxi. Pick the most sensible mode for THIS city and distance: walking for nearby stops; public transit (subway, metro, bus, train) in cities where it's fast, reliable and safe for visitors, such as New York, Washington DC, London, Paris, Tokyo, Singapore, Hong Kong, Berlin, Boston, Chicago; and rideshare/taxi/driving only where transit is poor, slow, or has real safety concerns for visitors, such as Los Angeles. When both transit and a car are reasonable, mention both briefly with rough times. Name the specific line or mode when you know it.\n- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the most sensible transport (transit, rideshare or driving, per the guidance above) for far-apart ones (rough estimates).\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"..."}],"walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
+  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, the best way to get between the two stops, and likely traffic. Do NOT default to taxi. Pick the most sensible mode for THIS city and distance: walking for nearby stops; public transit (subway, metro, bus, train) in cities where it's fast, reliable and safe for visitors, such as New York, Washington DC, London, Paris, Tokyo, Singapore, Hong Kong, Berlin, Boston, Chicago; and rideshare/taxi/driving only where transit is poor, slow, or has real safety concerns for visitors, such as Los Angeles. When both transit and a car are reasonable, mention both briefly with rough times. Name the specific line or mode when you know it.\n- For each day, also judge the ORDER of its stops. If a different order would cut backtracking, walking or traffic, or suit time of day (e.g. morning-only markets or museums first, sunset viewpoints and nightlife last), set "betterOrder" to the SAME stop names, spelled exactly as given, in the better sequence, and "orderNote" to a short reason (under 25 words). If the current order already works, set "betterOrder" to null and "orderNote" to a very short confirmation. Never add, drop or rename stops in betterOrder.
+- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the most sensible transport (transit, rideshare or driving, per the guidance above) for far-apart ones (rough estimates).\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"..."}],"betterOrder":["stop names"] or null,"orderNote":"...","walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
   const text = await callGemini(prompt, { json: true });
   try {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -375,6 +376,7 @@ function formatPlanCheckForSharing() {
     aiCheck = planCheckResult.days
       .map((d, i) => {
         const lines = [`Day ${i + 1} (~${d.walkingKm} km, ~${d.kcal} kcal)`];
+        if (Array.isArray(d.betterOrder) && d.orderNote) lines.push(`  Order tip: ${d.betterOrder.join(" -> ")} (${d.orderNote})`);
         (d.stops || []).forEach((st, si) => {
           const kw = st.keywords && st.keywords.length ? ` [${st.keywords.join(", ")}]` : "";
           lines.push(`  ${planCheckDays[i] ? planCheckDays[i][si] : "Stop"}${kw} - ${tag(st.verdict)}: ${st.feedback}`);
@@ -523,6 +525,37 @@ function addPlanCheckStop(dayIndex, stop) {
 
 function removePlanCheckStop(dayIndex, stopIndex) {
   planCheckDays[dayIndex].splice(stopIndex, 1);
+  planCheckResult = null;
+  render();
+}
+
+// Moving a stop changes which feedback belongs to which stop, so the old
+// result is cleared and the customer re-checks.
+function movePlanCheckStop(dayIndex, stopIndex, delta) {
+  const stops = planCheckDays[dayIndex];
+  const target = stopIndex + delta;
+  if (target < 0 || target >= stops.length) return;
+  [stops[stopIndex], stops[target]] = [stops[target], stops[stopIndex]];
+  planCheckResult = null;
+  render();
+}
+
+// Applies the AI's suggested order only if it's an exact reshuffle of the
+// stops already in the day (so a hallucinated name can't add or drop one).
+function applySuggestedOrder(dayIndex) {
+  const dr = planCheckResult && planCheckResult.days && planCheckResult.days[dayIndex];
+  const suggested = dr && dr.betterOrder;
+  const current = planCheckDays[dayIndex];
+  if (!Array.isArray(suggested) || suggested.length !== current.length) return;
+  const pool = [...current];
+  const next = [];
+  for (const name of suggested) {
+    const idx = pool.findIndex((c) => c.trim().toLowerCase() === String(name).trim().toLowerCase());
+    if (idx === -1) return;
+    next.push(pool.splice(idx, 1)[0]);
+  }
+  planCheckDays[dayIndex] = next;
+  planCheckResult = null;
   render();
 }
 
@@ -534,6 +567,7 @@ function addPlanCheckDay() {
 function removePlanCheckDay(dayIndex) {
   if (planCheckDays.length <= 1) return;
   planCheckDays.splice(dayIndex, 1);
+  planCheckResult = null;
   render();
 }
 
@@ -846,7 +880,12 @@ function renderPlanCheckSection() {
         .map((s, si) => {
           const stopRow = `
           <div class="plan-row">
-            <div class="plan-col"><span class="stop-chip">${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span></div>
+            <div class="plan-col"><span class="stop-chip">
+              <span class="stop-move">
+                <button type="button" class="stop-move-btn" data-move-stop="${i}|${si}|-1" ${si === 0 ? "disabled" : ""} title="Move earlier">▲</button>
+                <button type="button" class="stop-move-btn" data-move-stop="${i}|${si}|1" ${si === stops.length - 1 ? "disabled" : ""} title="Move later">▼</button>
+              </span>
+              ${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span></div>
             <div class="feedback-col">${planCheckLoading ? "" : stopFeedback(dr && dr.stops && dr.stops[si])}</div>
           </div>`;
           const hasNext = si < stops.length - 1;
@@ -867,10 +906,29 @@ function renderPlanCheckSection() {
           ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal</div></div>`
           : "";
 
+      let orderRow = "";
+      if (dr && !planCheckLoading && stops.length > 1) {
+        const better = Array.isArray(dr.betterOrder) && dr.betterOrder.length === stops.length ? dr.betterOrder : null;
+        orderRow = better
+          ? `<div class="plan-row">
+              <div class="plan-col plan-leg">🔀 Order of stops</div>
+              <div class="feedback-col"><div class="feedback-card feedback-review">
+                <div class="feedback-text"><strong>Try this order:</strong> ${better.map((n) => escapeHtml(String(n))).join(" → ")}</div>
+                ${dr.orderNote ? `<div class="feedback-text">${escapeHtml(dr.orderNote)}</div>` : ""}
+                <button type="button" class="pill-btn apply-order-btn" data-apply-order="${i}">Apply this order</button>
+              </div></div>
+            </div>`
+          : `<div class="plan-row">
+              <div class="plan-col plan-leg">🔀 Order of stops</div>
+              <div class="feedback-col"><div class="feedback-card feedback-leg feedback-good"><div class="feedback-text">✅ ${escapeHtml(dr.orderNote || "This order works well.")}</div></div></div>
+            </div>`;
+      }
+
       return `
       <div class="plan-check-day">
         <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
         ${stops.length ? rows : `<p class="rank-sub">No stops added yet.</p>`}
+        ${orderRow}
         <div class="plan-row">
           <div class="plan-col">
             <form class="custom-add" data-add-stop-form="${i}">
@@ -1366,6 +1424,17 @@ function bindEvents() {
       const input = form.querySelector("input");
       addPlanCheckStop(dayIndex, input.value);
     });
+  });
+
+  root.querySelectorAll("[data-move-stop]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [d, si, delta] = btn.dataset.moveStop.split("|").map(Number);
+      movePlanCheckStop(d, si, delta);
+    });
+  });
+
+  root.querySelectorAll("[data-apply-order]").forEach((btn) => {
+    btn.addEventListener("click", () => applySuggestedOrder(Number(btn.dataset.applyOrder)));
   });
 
   root.querySelectorAll("[data-remove-stop]").forEach((btn) => {
