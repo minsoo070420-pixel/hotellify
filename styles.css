@@ -713,3 +713,137 @@ main {
   padding: 6px 12px;
   font-size: 12px;
 }
+
+/* Simplified flow: stepper, tabs, quick-add */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.stepper-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.stepper-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.stepper-active {
+  color: var(--ink);
+}
+.stepper-active .stepper-num {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.stepper-done .stepper-num {
+  background: #2e7d4f;
+  border-color: #2e7d4f;
+  color: #fff;
+}
+.stepper-line {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  max-width: 40px;
+}
+
+.popular-row {
+  margin-bottom: 14px;
+}
+.all-cities {
+  margin-top: 14px;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--border);
+  padding: 4px;
+  border-radius: 999px;
+  margin: 8px 0 18px;
+}
+.tab-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab-active {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(28, 27, 25, 0.12);
+}
+
+.cta-plan {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 15px;
+  margin: 8px 0 8px;
+}
+
+.quick-add {
+  margin-bottom: 8px;
+}
+.quick-chip {
+  font-size: 12px;
+}
+
+.share-details {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.share-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+}
+.share-details[open] summary {
+  margin-bottom: 8px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.chip {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chip:hover {
+  border-color: var(--ink);
+}
+.chip-active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}

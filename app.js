@@ -59,6 +59,9 @@ let selectedCity = null;
 let selectedHotel = null;
 let selectedTheme = null;
 let showCustomHotelForm = false;
+let showAllCities = false;
+let answerTab = "hotel"; // hotel | plan
+let shareOpen = false;
 
 // AI plan check (Gemini) — the only place this app calls an LLM. The API
 // key lives ONLY in localStorage, entered by the user at runtime in this
@@ -326,6 +329,8 @@ function chooseTheme(themeKey) {
 
 function chooseHotel(hotel) {
   selectedHotel = hotel;
+  answerTab = "hotel";
+  shareOpen = false;
   sharePlanError = null;
   sharePlanSuccess = false;
   planCheckDays = [[]];
@@ -348,6 +353,9 @@ function chooseHotel(hotel) {
 }
 
 function planNewTrip() {
+  answerTab = "hotel";
+  shareOpen = false;
+  showAllCities = false;
   selectedCity = null;
   selectedHotel = null;
   selectedTheme = null;
@@ -615,7 +623,7 @@ function renderAccountControl() {
 }
 
 function render() {
-  root.classList.toggle("wide", step === "answer");
+  root.classList.toggle("wide", step === "answer" && answerTab === "plan");
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
@@ -699,15 +707,27 @@ function renderCommunityStep() {
   return header + engageNote + `<ul class="rank-list">${cards}</ul>`;
 }
 
+function renderStepper(current) {
+  const items = ["City", "Vibe", "Hotel"];
+  return `<div class="stepper">${items
+    .map((label, i) => `<span class="stepper-item ${i + 1 === current ? "stepper-active" : i + 1 < current ? "stepper-done" : ""}"><span class="stepper-num">${i + 1 < current ? "✓" : i + 1}</span>${label}</span>`)
+    .join('<span class="stepper-line"></span>')}</div>`;
+}
+
+function popularCities(limit) {
+  const counts = {};
+  MOCK_HOTELS.forEach((h) => (counts[h.city] = (counts[h.city] || 0) + 1));
+  return Object.keys(counts)
+    .sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
+    .slice(0, limit);
+}
+
 function renderCityStep() {
   const rawQuery = cityQuery.trim();
   const q = rawQuery.toLowerCase();
   const allCities = uniqueCities();
   const cities = allCities.filter((c) => (q ? c.toLowerCase().includes(q) : true));
-  const rows = cities
-    .slice(0, 30)
-    .map((c) => `<button class="rank-row city-row" data-pick-city="${escapeHtml(c)}">${escapeHtml(c)}</button>`)
-    .join("");
+  const cityButton = (c) => `<button class="rank-row city-row" data-pick-city="${escapeHtml(c)}">${escapeHtml(c)}</button>`;
 
   const exactMatch = allCities.some((c) => c.toLowerCase() === q);
   const useTypedCity =
@@ -715,13 +735,27 @@ function renderCityStep() {
       ? `<button class="pill-btn ghost use-typed-city" data-pick-city="${escapeHtml(rawQuery)}">Use "${escapeHtml(rawQuery)}" as my city</button>`
       : "";
 
+  let body;
+  if (rawQuery) {
+    body = `<div class="rank-list">${cities.map(cityButton).join("")}</div>${useTypedCity}`;
+  } else {
+    const popular = popularCities(8)
+      .map((c) => `<button class="chip" data-pick-city="${escapeHtml(c)}">${escapeHtml(c)}</button>`)
+      .join("");
+    body = `
+      <div class="detail-label">Popular</div>
+      <div class="chip-row popular-row">${popular}</div>
+      <button class="pill-btn ghost" data-show-all-cities>${showAllCities ? "Hide full list" : `Browse all ${allCities.length} cities`}</button>
+      ${showAllCities ? `<div class="rank-list all-cities">${allCities.map(cityButton).join("")}</div>` : ""}`;
+  }
+
   return `
+    ${renderStepper(1)}
     <h2 class="step-heading">Where are you traveling?</h2>
     <div class="search-wrap">
-      <input id="city-input" type="text" placeholder="Search a city…" value="${escapeHtml(cityQuery)}" />
+      <input id="city-input" type="text" placeholder="Type a city, e.g. Paris" value="${escapeHtml(cityQuery)}" />
     </div>
-    <div class="rank-list">${rows || (rawQuery ? "" : `<div class="empty">No cities match. Try a different search.</div>`)}</div>
-    ${useTypedCity}
+    ${body}
   `;
 }
 
@@ -737,6 +771,7 @@ function renderThemeStep() {
   }).join("");
 
   return `
+    ${renderStepper(2)}
     <button class="icon-btn back-btn" data-step="city">← Change city</button>
     <h2 class="step-heading">What's the vibe for this trip?</h2>
     <p class="rank-sub">Traveling to ${escapeHtml(selectedCity)}</p>
@@ -772,6 +807,7 @@ function renderHotelStep() {
     : `<button class="pill-btn ghost" id="show-custom-hotel">Can't find it? Enter it manually</button>`;
 
   return `
+    ${renderStepper(3)}
     <button class="icon-btn back-btn" data-step="theme">← Change theme</button>
     <h2 class="step-heading">Choose your hotel in ${escapeHtml(selectedCity)}</h2>
     <p class="rank-sub">${theme.emoji} ${theme.label} trip · scores show fit for this vibe</p>
@@ -836,14 +872,22 @@ function renderAnswerStep() {
       </div>
     </div>
 
-    <ul class="reasons-list">${reasonsList}</ul>
+    <div class="tabs">
+      <button class="tab-btn ${answerTab === "hotel" ? "tab-active" : ""}" data-answer-tab="hotel">🏨 Hotel</button>
+      <button class="tab-btn ${answerTab === "plan" ? "tab-active" : ""}" data-answer-tab="plan">🗓️ Plan my days</button>
+    </div>
 
+    ${
+      answerTab === "plan"
+        ? renderPlanCheckSection()
+        : `
+    <ul class="reasons-list">${reasonsList}</ul>
+    ${links}
+    <button class="pill-btn cta-plan" data-answer-tab="plan">🗓️ Plan my days here →</button>
     ${addressBlock}
     ${nearbyBlock}
-    ${gettingThere}
-    ${links}
-
-    ${renderPlanCheckSection()}
+    ${gettingThere}`
+    }
 
     <div class="detail-actions">
       <button class="pill-btn ghost" data-step="theme">Try a different theme</button>
@@ -851,6 +895,17 @@ function renderAnswerStep() {
     </div>
     <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
+}
+
+function quickAddChips(dayIndex, stops) {
+  const nearby = (selectedHotel && selectedHotel.nearby) || [];
+  const used = new Set(stops.map((x) => x.trim().toLowerCase()));
+  const chips = nearby
+    .map((name, ni) => ({ name, ni }))
+    .filter(({ name }) => !used.has(name.trim().toLowerCase()))
+    .map(({ name, ni }) => `<button type="button" class="chip quick-chip" data-quick-add="${dayIndex}|${ni}">+ ${escapeHtml(name)}</button>`)
+    .join("");
+  return chips ? `<div class="quick-add"><div class="rank-sub">Tap to add a place near your hotel:</div><div class="chip-row">${chips}</div></div>` : "";
 }
 
 function renderPlanCheckSection() {
@@ -931,6 +986,7 @@ function renderPlanCheckSection() {
         ${orderRow}
         <div class="plan-row">
           <div class="plan-col">
+            ${quickAddChips(i, stops)}
             <form class="custom-add" data-add-stop-form="${i}">
               <input type="text" placeholder="Add a place (e.g. Eiffel Tower)" />
               <button type="submit" class="pill-btn ghost">Add</button>
@@ -964,22 +1020,22 @@ function renderPlanCheckSection() {
     ? sharePlanSuccess
       ? `<p class="rank-sub">🎉 Shared with the community! Check the 🌍 Community tab.</p>`
       : `
-      <div class="detail-section">
-        <div class="detail-label">Notes</div>
-        <textarea id="plan-check-notes" class="plan-textarea" rows="3" placeholder="Any tips for other travelers following this plan?">${escapeHtml(planCheckNotes)}</textarea>
+      <details class="share-details" data-share-details ${shareOpen ? "open" : ""}>
+        <summary>🌍 Share this plan with the community</summary>
+        <textarea id="plan-check-notes" class="plan-textarea" rows="3" placeholder="Add a note for other travelers (optional)">${escapeHtml(planCheckNotes)}</textarea>
         ${sharePlanError ? `<p class="rank-sub plan-error">${escapeHtml(sharePlanError)}</p>` : ""}
-        <button class="pill-btn ghost" id="share-plan-btn" ${sharePlanLoading || !hasAnyStops ? "disabled" : ""}>${sharePlanLoading ? "Sharing…" : "🌍 Share with the Community"}</button>
+        <button class="pill-btn" id="share-plan-btn" ${sharePlanLoading || !hasAnyStops ? "disabled" : ""}>${sharePlanLoading ? "Sharing…" : "Share"}</button>
         ${!currentUser ? `<p class="rank-sub">Sign in to share your plan publicly.</p>` : ""}
-      </div>`
+      </details>`
     : "";
 
   return `
   <div class="detail-section plan-section">
     <div class="detail-label">📍 Check My Plan</div>
-    <p class="rank-sub">Add the places you actually want to visit each day — AI checks whether it's realistic (too much walking, bad traffic, overpacked days) and estimates the calories you'll burn each day.</p>
+    <p class="rank-sub">Add the places you want to visit each day, then tap Check My Plan. You'll get feedback on every stop and the order, plus walking and calories.</p>
     ${dayBlocks}
     <button type="button" class="pill-btn ghost" id="add-day-btn">+ Add Day</button>
-    <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking…" : "🔍 Check My Plan"}</button>
+    <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking… (can take up to 30s)" : "🔍 Check My Plan"}</button>
     ${resultBlock}
     ${shareBlock}
   </div>`;
@@ -1425,6 +1481,33 @@ function bindEvents() {
       addPlanCheckStop(dayIndex, input.value);
     });
   });
+
+  root.querySelectorAll("[data-answer-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      answerTab = btn.dataset.answerTab;
+      render();
+      window.scrollTo(0, 0);
+    });
+  });
+
+  const showAllBtn = root.querySelector("[data-show-all-cities]");
+  if (showAllBtn) {
+    showAllBtn.addEventListener("click", () => {
+      showAllCities = !showAllCities;
+      render();
+    });
+  }
+
+  root.querySelectorAll("[data-quick-add]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [d, ni] = btn.dataset.quickAdd.split("|").map(Number);
+      const name = selectedHotel.nearby[ni];
+      if (name) addPlanCheckStop(d, name);
+    });
+  });
+
+  const shareDetails = root.querySelector("[data-share-details]");
+  if (shareDetails) shareDetails.addEventListener("toggle", () => (shareOpen = shareDetails.open));
 
   root.querySelectorAll("[data-move-stop]").forEach((btn) => {
     btn.addEventListener("click", () => {
