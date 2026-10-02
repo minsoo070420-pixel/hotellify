@@ -175,16 +175,18 @@ function clearGeminiKey() {
 // answers 503 (overloaded) or 429 (rate-limited) for the current one.
 const GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
 
-async function callGemini(prompt) {
+async function callGemini(prompt, { json = false } = {}) {
   const key = getGeminiKey();
   let lastError = null;
+  const payload = { contents: [{ parts: [{ text: prompt }] }] };
+  if (json) payload.generationConfig = { responseMimeType: "application/json" };
 
   for (const model of GEMINI_FALLBACK_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -211,8 +213,15 @@ async function evaluateCustomItinerary(hotel, themeKey, days) {
   const dayLines = days
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
-  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nEvaluate whether this plan is logistically realistic. Call out specific problems where they actually exist: too much walking or backtracking between stops, likely bad traffic or a long commute between stops that are far apart, a day with too many stops crammed in, or a day that's too sparse. If a day looks fine, say so briefly instead of inventing a problem. Only suggest concrete fixes (reordering stops, splitting a day) where there's a real issue.\n\nThen, for EACH day, estimate the physical effort: approximate total walking distance (km) including walking between stops and around each stop, and the approximate calories burned (kcal) for an average adult, assuming they walk between nearby stops and use taxi/transit for far-apart ones. Put each day's estimate on its own line in the form "Day N: ~X km walking, ~Y kcal". Finish with one line "Total: ~Z kcal over N days". These are rough estimates, so say so briefly.\n\nKeep it under 400 words, plain text, no markdown headers.`;
-  return callGemini(prompt);
+  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nEvaluate whether this plan is logistically realistic. Call out specific problems where they actually exist: too much walking or backtracking between stops, likely bad traffic or a long commute between stops that are far apart, a day with too many stops crammed in, or a day that's too sparse. If a day looks fine, say so briefly instead of inventing a problem. Only suggest concrete fixes (reordering stops, splitting a day) where there's a real issue.\n\nFor EACH day also estimate the physical effort: approximate walking distance (km) including walking between stops and around each stop, and approximate calories burned (kcal) for an average adult, assuming they walk between nearby stops and use taxi/transit for far-apart ones. These are rough estimates.\n\nRespond with ONLY a JSON object, exactly this shape, with one entry in "days" per day in order (${days.length} total):\n{"days":[{"verdict":"good" or "review","feedback":"1-3 sentences, specific","walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","totalKcal":number}\nUse "good" when the day is realistic as written; use "review" when it's worth looking at again (too much walking, bad traffic, overpacked, etc.). Keep each feedback under 60 words.`;
+  const text = await callGemini(prompt, { json: true });
+  try {
+    const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+    if (parsed && Array.isArray(parsed.days)) return parsed;
+  } catch (e) {
+    // fall through to raw text
+  }
+  return { raw: text };
 }
 
 function hotelSubtitle(h) {
@@ -353,7 +362,16 @@ function formatPlanCheckForSharing() {
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
   const notes = planCheckNotes.trim();
-  const aiCheck = planCheckResult ? planCheckResult.trim() : "";
+  let aiCheck = "";
+  if (planCheckResult && planCheckResult.raw) {
+    aiCheck = planCheckResult.raw.trim();
+  } else if (planCheckResult) {
+    aiCheck = planCheckResult.days
+      .map((d, i) => `Day ${i + 1} (${d.verdict === "good" ? "looks good" : "worth another look"}): ${d.feedback} ~${d.walkingKm} km, ~${d.kcal} kcal`)
+      .join("\n");
+    if (planCheckResult.summary) aiCheck += `\n${planCheckResult.summary}`;
+    if (planCheckResult.totalKcal) aiCheck += `\nTotal: ~${planCheckResult.totalKcal} kcal`;
+  }
   let text = dayLines;
   if (notes) text += `\n\nNotes: ${notes}`;
   if (aiCheck) text += `\n\nAI Check: ${aiCheck}`;
@@ -469,6 +487,7 @@ function renderAccountControl() {
 }
 
 function render() {
+  root.classList.toggle("wide", step === "answer");
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
@@ -676,6 +695,21 @@ function renderAnswerStep() {
 }
 
 function renderPlanCheckSection() {
+  const structured = planCheckResult && !planCheckResult.raw ? planCheckResult : null;
+
+  const feedbackCell = (i) => {
+    if (planCheckLoading) return `<div class="feedback-card feedback-pending">Checking…</div>`;
+    const d = structured && structured.days[i];
+    if (!d) return `<div class="feedback-card feedback-pending">Feedback appears here after you check your plan.</div>`;
+    const good = d.verdict === "good";
+    return `
+      <div class="feedback-card ${good ? "feedback-good" : "feedback-review"}">
+        <div class="feedback-verdict">${good ? "✅ Looks good" : "⚠️ Maybe look at this again"}</div>
+        <div class="feedback-text">${escapeHtml(d.feedback || "")}</div>
+        <div class="feedback-stats">~${escapeHtml(String(d.walkingKm))} km walking · ~${escapeHtml(String(d.kcal))} kcal</div>
+      </div>`;
+  };
+
   const dayBlocks = planCheckDays
     .map((stops, i) => {
       const stopChips = stops.length
@@ -686,25 +720,32 @@ function renderPlanCheckSection() {
       const removeBtn = planCheckDays.length > 1 ? `<button type="button" class="icon-btn" data-remove-day="${i}">Remove day</button>` : "";
       return `
       <div class="plan-check-day">
-        <div class="detail-label">Day ${i + 1} ${removeBtn}</div>
-        ${stopChips}
-        <form class="custom-add" data-add-stop-form="${i}">
-          <input type="text" placeholder="Add a place (e.g. Eiffel Tower)" />
-          <button type="submit" class="pill-btn ghost">Add</button>
-        </form>
+        <div class="plan-col">
+          <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
+          ${stopChips}
+          <form class="custom-add" data-add-stop-form="${i}">
+            <input type="text" placeholder="Add a place (e.g. Eiffel Tower)" />
+            <button type="submit" class="pill-btn ghost">Add</button>
+          </form>
+        </div>
+        <div class="feedback-col">${feedbackCell(i)}</div>
       </div>`;
     })
     .join("");
 
   let resultBlock = "";
-  if (planCheckLoading) {
-    resultBlock = `<p class="rank-sub">Checking your plan…</p>`;
-  } else if (planCheckError) {
+  if (planCheckError) {
     resultBlock = `
       <p class="rank-sub plan-error">${escapeHtml(planCheckError)}</p>
       <button class="icon-btn change-key-btn">Change API key</button>`;
-  } else if (planCheckResult) {
-    resultBlock = `<p class="rank-sub ai-plan-text">${escapeHtml(planCheckResult)}</p>`;
+  } else if (planCheckResult && planCheckResult.raw) {
+    resultBlock = `<p class="rank-sub ai-plan-text">${escapeHtml(planCheckResult.raw)}</p>`;
+  } else if (structured && !planCheckLoading) {
+    resultBlock = `
+      <div class="plan-summary">
+        ${structured.summary ? `<div>${escapeHtml(structured.summary)}</div>` : ""}
+        ${structured.totalKcal ? `<div class="plan-summary-total">Total: ~${escapeHtml(String(structured.totalKcal))} kcal over ${planCheckDays.length} day${planCheckDays.length > 1 ? "s" : ""} (rough estimate)</div>` : ""}
+      </div>`;
   }
 
   const hasAnyStops = planCheckDays.some((d) => d.length > 0);

@@ -351,15 +351,97 @@ main {
   min-width: 0;
 }
 
+#app.wide {
+  max-width: 920px;
+}
+
 .plan-check-day {
-  margin: 14px 0;
-  padding-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin: 18px 0;
+  padding-top: 16px;
   border-top: 1px solid var(--border);
 }
-.plan-check-day .detail-label {
+
+.plan-day-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.plan-day-label .icon-btn {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.plan-check-day .stop-chip {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 8px 8px 14px;
+}
+
+.feedback-card {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 2px solid var(--border);
+  background: var(--card);
+  height: 100%;
+}
+.feedback-pending {
+  color: var(--muted);
+  font-size: 13px;
+  border-style: dashed;
+  display: flex;
+  align-items: center;
+}
+.feedback-good {
+  background: #e8f6ee;
+  border-color: #2e7d4f;
+  color: #1d5a37;
+}
+.feedback-review {
+  background: #fdecea;
+  border-color: #c0392b;
+  color: #8e2a1f;
+}
+.feedback-verdict {
+  font-weight: 800;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.feedback-text {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.feedback-stats {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+  opacity: 0.85;
+}
+
+.plan-summary {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.plan-summary-total {
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+@media (max-width: 700px) {
+  .plan-check-day {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 .stop-chip-row {
