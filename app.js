@@ -797,14 +797,27 @@ function planStep() {
   return "city";
 }
 
+// Line icons (24px grid, stroke follows the text color) for the menus.
+const ICON_PATHS = {
+  plan: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  community: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  journal: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  hotel: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+};
+
+function icon(name) {
+  return `<svg class="icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+}
+
 function renderBottomNav() {
   const active = step === "community" ? "community" : step === "journal" ? "journal" : "plan";
   const item = (key, icon, label) =>
     `<button class="nav-item ${active === key ? "nav-active" : ""}" data-nav="${key}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`;
   return `<nav class="bottom-nav">
-    ${item("plan", "🧭", "Plan")}
-    ${isSupabaseConfigured() ? item("community", "🌍", "Community") : ""}
-    ${item("journal", "📖", "Journal")}
+    ${item("plan", icon("plan"), "Plan")}
+    ${isSupabaseConfigured() ? item("community", icon("community"), "Community") : ""}
+    ${item("journal", icon("journal"), "Journal")}
   </nav>`;
 }
 
@@ -1037,8 +1050,8 @@ function renderAnswerStep() {
     </div>
 
     <div class="tabs">
-      <button class="tab-btn ${answerTab === "hotel" ? "tab-active" : ""}" data-answer-tab="hotel">🏨 Hotel</button>
-      <button class="tab-btn ${answerTab === "plan" ? "tab-active" : ""}" data-answer-tab="plan">🗓️ Plan my days</button>
+      <button class="tab-btn ${answerTab === "hotel" ? "tab-active" : ""}" data-answer-tab="hotel">${icon("hotel")}Hotel</button>
+      <button class="tab-btn ${answerTab === "plan" ? "tab-active" : ""}" data-answer-tab="plan">${icon("calendar")}Plan my days</button>
     </div>
 
     ${

@@ -952,3 +952,24 @@ main {
   color: var(--ink);
   border: 1px solid var(--border);
 }
+
+.icon {
+  display: block;
+  flex-shrink: 0;
+}
+.nav-icon {
+  display: flex;
+}
+.nav-active .icon {
+  stroke-width: 2.2;
+}
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tab-btn .icon {
+  width: 18px;
+  height: 18px;
+}
