@@ -51,6 +51,7 @@ async function fetchJournalEntries(userId) {
   if (error) throw error;
   return data.map((row) => ({
     id: row.id,
+    hotelId: row.hotel_id,
     city: row.city,
     hotelName: row.hotel_name,
     themeKey: row.theme_key,

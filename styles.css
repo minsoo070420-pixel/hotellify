@@ -847,3 +847,108 @@ main {
   color: #fff;
   border-color: var(--ink);
 }
+
+/* Bottom navigation + compact account/info UI */
+main {
+  padding-bottom: 96px;
+}
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+.nav-item {
+  flex: 1;
+  max-width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  border-radius: 12px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.nav-icon {
+  font-size: 20px;
+}
+.nav-active {
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.account-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 6px 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.account-signout {
+  background: var(--bg);
+  border: none;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.info-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px 14px;
+  margin: 14px 0;
+}
+.info-row {
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.info-row + .info-row {
+  border-top: 1px solid var(--border);
+}
+.info-row a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.action-stack .detail-links {
+  margin: 0;
+}
+.action-stack .detail-links .pill-btn {
+  width: 100%;
+  text-align: center;
+}
+.action-stack .detail-links .pill-btn {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}

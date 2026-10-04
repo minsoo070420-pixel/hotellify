@@ -380,6 +380,15 @@ function computeEarnedBadges(journal) {
 // ---------- journal ----------
 
 function recordTripMatch(entry) {
+  // Re-matching the same hotel + vibe refreshes the existing entry instead
+  // of adding a duplicate row (which also inflated badge counts).
+  const existing = state.journal.findIndex((j) => j.themeKey === entry.themeKey && (entry.hotelId ? j.hotelId === entry.hotelId : j.hotelName === entry.hotelName));
+  if (existing !== -1) {
+    const [prev] = state.journal.splice(existing, 1);
+    state.journal.unshift({ ...prev, score: entry.score, verdict: entry.verdict, timestamp: entry.timestamp });
+    if (!(journalSource === "account" && currentUser)) saveState();
+    return;
+  }
   state.journal.unshift(entry);
   if (journalSource === "account" && currentUser) {
     insertJournalEntry(currentUser.id, entry).catch((e) => {
@@ -387,6 +396,38 @@ function recordTripMatch(entry) {
     });
   } else {
     saveState();
+  }
+}
+
+// ---------- session (keeps your place if the page reloads) ----------
+
+const SESSION_KEY = "hotelify_session_v1";
+
+function saveSession() {
+  try {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ selectedCity, selectedTheme, selectedHotel, step: ["city", "theme", "hotel", "answer"].includes(step) ? step : planStep(), answerTab, planCheckDays, planCheckNotes, planCheckResult })
+    );
+  } catch (e) {
+    // storage unavailable — progress just won't persist
+  }
+}
+
+function restoreSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!saved) return;
+    selectedCity = saved.selectedCity || null;
+    selectedTheme = saved.selectedTheme && THEME_META[saved.selectedTheme] ? saved.selectedTheme : null;
+    selectedHotel = saved.selectedHotel || null;
+    answerTab = saved.answerTab === "plan" ? "plan" : "hotel";
+    if (Array.isArray(saved.planCheckDays) && saved.planCheckDays.length) planCheckDays = saved.planCheckDays;
+    planCheckNotes = saved.planCheckNotes || "";
+    planCheckResult = saved.planCheckResult || null;
+    step = planStep();
+  } catch (e) {
+    // ignore a corrupt saved session
   }
 }
 
@@ -407,19 +448,23 @@ function chooseTheme(themeKey) {
   render();
 }
 
-function chooseHotel(hotel) {
+function chooseHotel(hotel, { record = true } = {}) {
+  // Coming back to the same hotel + vibe keeps the plan you were building.
+  const sameTrip = selectedHotel && selectedHotel.id === hotel.id && step === "answer";
   selectedHotel = hotel;
-  resetSuggestions();
   answerTab = "hotel";
-  shareOpen = false;
-  sharePlanError = null;
-  sharePlanSuccess = false;
-  planCheckDays = [[]];
-  planCheckNotes = "";
-  planCheckResult = null;
-  planCheckError = null;
+  if (!sameTrip) {
+    resetSuggestions();
+    shareOpen = false;
+    sharePlanError = null;
+    sharePlanSuccess = false;
+    planCheckDays = [[]];
+    planCheckNotes = "";
+    planCheckResult = null;
+    planCheckError = null;
+  }
   const fit = evaluateFit(hotel, selectedTheme);
-  recordTripMatch({
+  if (record) recordTripMatch({
     id: "trip-" + Date.now(),
     hotelId: hotel.id,
     city: hotel.city,
@@ -739,9 +784,28 @@ function renderAccountControl() {
   if (!isSupabaseConfigured()) return "";
   if (currentUser) {
     const username = currentUser.user_metadata && currentUser.user_metadata.username ? currentUser.user_metadata.username : currentUser.email;
-    return `<button class="journal-badge" id="sign-out-btn" title="Sign out">👤 ${escapeHtml(username)}</button>`;
+    return `<span class="account-pill">👤 ${escapeHtml(username)} <button class="account-signout" id="sign-out-btn">Sign out</button></span>`;
   }
-  return `<button class="journal-badge" id="sign-in-btn">Sign In</button>`;
+  return `<button class="journal-badge" id="sign-in-btn">Sign in</button>`;
+}
+
+// Where "Plan" should return to: the furthest point of the current trip.
+function planStep() {
+  if (selectedHotel && selectedTheme) return "answer";
+  if (selectedTheme) return "hotel";
+  if (selectedCity) return "theme";
+  return "city";
+}
+
+function renderBottomNav() {
+  const active = step === "community" ? "community" : step === "journal" ? "journal" : "plan";
+  const item = (key, icon, label) =>
+    `<button class="nav-item ${active === key ? "nav-active" : ""}" data-nav="${key}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`;
+  return `<nav class="bottom-nav">
+    ${item("plan", "🧭", "Plan")}
+    ${isSupabaseConfigured() ? item("community", "🌍", "Community") : ""}
+    ${item("journal", "📖", "Journal")}
+  </nav>`;
 }
 
 function render() {
@@ -750,16 +814,14 @@ function render() {
     <header class="topbar">
       <div class="topbar-row">
         <button class="brand brand-btn" data-plan-new title="Start a new trip">${LOGO_SVG} Hotelify</button>
-        <div class="header-right">
-          ${renderAccountControl()}
-          ${isSupabaseConfigured() ? `<button class="journal-badge" id="view-community-btn" title="Community Plans">🌍 Community</button>` : ""}
-          <button class="journal-badge" data-view-journal title="Your Trip Journal">📖 Journal</button>
-        </div>
+        <div class="header-right">${renderAccountControl()}</div>
       </div>
     </header>
     <main>${renderStep()}</main>
+    ${renderBottomNav()}
   `;
   bindEvents();
+  saveSession();
 }
 
 function renderStep() {
@@ -774,7 +836,6 @@ function renderStep() {
 
 function renderCommunityStep() {
   const header = `
-    <button class="icon-btn back-btn" data-step="city">← Back</button>
     <h2 class="step-heading">Community Plans</h2>
     <p class="rank-sub">Real itineraries written by other travelers.</p>
   `;
@@ -945,32 +1006,13 @@ function renderAnswerStep() {
 
   const reasonsList = fit.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
 
-  const addressBlock = hotel.address
-    ? `
-    <div class="detail-section">
-      <div class="detail-label">Address</div>
-      <div class="rank-sub">${escapeHtml(hotel.address)}</div>
-    </div>`
-    : "";
-
-  const nearbyBlock =
-    hotel.nearby && hotel.nearby.length
-      ? `
-    <div class="detail-section">
-      <div class="detail-label">Nearby</div>
-      <div class="rank-sub">${hotel.nearby.map(escapeHtml).join(" · ")}</div>
-    </div>`
-      : "";
-
   const gt = gettingThereUrls(hotel);
-  const gettingThere = `
-    <div class="detail-section">
-      <div class="detail-label">Getting there from the airport</div>
-      <div class="detail-links">
-        <a class="pill-btn ghost" href="${gt.transit}" target="_blank" rel="noopener">🚆 Economical (transit)</a>
-        <a class="pill-btn ghost" href="${gt.driving}" target="_blank" rel="noopener">🚕 Fastest (drive/taxi)</a>
-      </div>
-      <p class="rank-sub getting-there-note">Opens live Google Maps directions — real current times/fares, not a guess.</p>
+  const mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hotel.address || [hotel.name, hotel.city].join(" "))}`;
+  const infoCard = `
+    <div class="info-card">
+      ${hotel.address ? `<div class="info-row"><span>📍</span><a href="${mapsLink}" target="_blank" rel="noopener">${escapeHtml(hotel.address)}</a></div>` : ""}
+      ${hotel.nearby && hotel.nearby.length ? `<div class="info-row"><span>🗺️</span><div>Near ${hotel.nearby.map(escapeHtml).join(" · ")}</div></div>` : ""}
+      <div class="info-row"><span>✈️</span><div>From the airport: <a href="${gt.transit}" target="_blank" rel="noopener">transit</a> · <a href="${gt.driving}" target="_blank" rel="noopener">drive</a></div></div>
     </div>`;
 
   const links = hotel.website
@@ -1004,18 +1046,16 @@ function renderAnswerStep() {
         ? renderPlanCheckSection()
         : `
     <ul class="reasons-list">${reasonsList}</ul>
-    ${links}
-    <button class="pill-btn cta-plan" data-answer-tab="plan">🗓️ Plan my days here →</button>
-    ${addressBlock}
-    ${nearbyBlock}
-    ${gettingThere}`
+    ${infoCard}
+    <div class="action-stack">
+      <button class="pill-btn cta-plan" data-answer-tab="plan">🗓️ Plan my days here →</button>
+      ${links}
+    </div>`
     }
 
     <div class="detail-actions">
-      <button class="pill-btn ghost" data-step="theme">Try a different theme</button>
-      <button class="pill-btn ghost" data-step="hotel">Try a different hotel</button>
+      <button class="icon-btn" data-step="theme">Try a different vibe</button>
     </div>
-    <p class="rank-sub journal-note">Saved to your Trip Journal</p>
   `;
 }
 
@@ -1463,30 +1503,29 @@ function renderJournal() {
   const badgesSection = renderBadgesSection();
   if (state.journal.length === 0) {
     return `
-      <button class="icon-btn back-btn" data-step="city">← Back</button>
       <h2 class="step-heading">Your Trip Journal</h2>
       ${badgesSection}
       <div class="empty">No trips planned yet. Match your first hotel to start your journal.</div>
     `;
   }
   const rows = state.journal
-    .map((j) => {
+    .map((j, idx) => {
       const theme = THEME_META[j.themeKey];
       const color = j.score >= 75 ? "#2e7d4f" : j.score >= 50 ? "#b8860b" : "#c0392b";
       return `
-      <li class="rank-row">
+      <li><button class="rank-row" data-open-trip="${idx}">
         <div class="rank-info">
           <div class="rank-name">${theme.emoji} ${escapeHtml(j.hotelName)}</div>
           <div class="rank-sub">${escapeHtml(j.city)} · ${theme.label} · ${timeAgo(j.timestamp)}</div>
         </div>
         <span class="badge" style="background:${color}">${j.score}%</span>
-      </li>`;
+      </button></li>`;
     })
     .join("");
 
   return `
-    <button class="icon-btn back-btn" data-step="city">← Back</button>
     <h2 class="step-heading">Your Trip Journal</h2>
+    <p class="rank-sub">Tap a trip to open it again.</p>
     ${badgesSection}
     <ul class="rank-list">${rows}</ul>
   `;
@@ -1495,6 +1534,33 @@ function renderJournal() {
 // ---------- events ----------
 
 function bindEvents() {
+  root.querySelectorAll("[data-open-trip]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const j = state.journal[Number(btn.dataset.openTrip)];
+      if (!j) return;
+      const hotel = MOCK_HOTELS.find((h) => h.id === j.hotelId) || { id: j.hotelId || makeCustomId(), name: j.hotelName, city: j.city, tags: [] };
+      selectedCity = j.city;
+      selectedTheme = j.themeKey;
+      chooseHotel(hotel, { record: false });
+      window.scrollTo(0, 0);
+    });
+  });
+
+  root.querySelectorAll("[data-nav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.nav;
+      if (target === "community") viewCommunity();
+      else if (target === "journal") {
+        step = "journal";
+        render();
+      } else {
+        step = planStep();
+        render();
+      }
+      window.scrollTo(0, 0);
+    });
+  });
+
   const journalBtn = root.querySelector("[data-view-journal]");
   if (journalBtn) {
     journalBtn.addEventListener("click", () => {
@@ -1545,8 +1611,6 @@ function bindEvents() {
     });
   });
 
-  const communityBtn = document.getElementById("view-community-btn");
-  if (communityBtn) communityBtn.addEventListener("click", viewCommunity);
 
   const planCheckNotesInput = document.getElementById("plan-check-notes");
   if (planCheckNotesInput) {
@@ -1701,5 +1765,6 @@ function bindEvents() {
   }
 }
 
+restoreSession();
 render();
 initAuth();
