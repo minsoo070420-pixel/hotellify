@@ -450,7 +450,7 @@ function chooseTheme(themeKey) {
 
 function chooseHotel(hotel, { record = true } = {}) {
   // Coming back to the same hotel + vibe keeps the plan you were building.
-  const sameTrip = selectedHotel && selectedHotel.id === hotel.id && step === "answer";
+  const sameTrip = selectedHotel && selectedHotel.id === hotel.id;
   selectedHotel = hotel;
   answerTab = "hotel";
   if (!sameTrip) {
