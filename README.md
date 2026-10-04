@@ -1,4 +1,4 @@
-# Hotelify
+# Travelify
 
 A trip-fit matcher: pick a city you're traveling to, pick a trip theme (Romantic / Family / Business / Adventure / Relaxation), pick a hotel there (the picker shows each one's fit score for that theme), and get a plain-language verdict plus an optional AI-generated itinerary.
 

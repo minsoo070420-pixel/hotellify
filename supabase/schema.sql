@@ -1,4 +1,4 @@
--- Hotelify backend schema (run once in Supabase: Project → SQL Editor → New query).
+-- Travelify backend schema (run once in Supabase: Project → SQL Editor → New query).
 -- Phase 1: profiles + per-account journal entries.
 -- Phase 2 (scaffolded now so it doesn't require a later migration): follows,
 -- for the Beli-style "see other travelers' journals" competitive layer.

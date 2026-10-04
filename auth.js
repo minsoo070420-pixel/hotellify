@@ -1,4 +1,4 @@
-// Thin wrapper around the Supabase JS client for Hotelify accounts.
+// Thin wrapper around the Supabase JS client for Travelify accounts.
 // Requires config.js to be loaded first with a real SUPABASE_URL /
 // SUPABASE_ANON_KEY — until then, isSupabaseConfigured() is false and the
 // app falls back to the old guest/localStorage-only journal.

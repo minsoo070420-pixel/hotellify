@@ -1,4 +1,4 @@
-// Hotelify — trip-fit matcher.
+// Travelify — trip-fit matcher.
 // Flow: pick a city -> pick a hotel in it -> pick a trip theme -> get a
 // fit score + reasons for why that hotel suits that theme.
 //
@@ -826,7 +826,7 @@ function render() {
   root.innerHTML = `
     <header class="topbar">
       <div class="topbar-row">
-        <button class="brand brand-btn" data-plan-new title="Start a new trip">${LOGO_SVG} Hotelify</button>
+        <button class="brand brand-btn" data-plan-new title="Start a new trip">${LOGO_SVG} Travelify</button>
         <div class="header-right">${renderAccountControl()}</div>
       </div>
     </header>
@@ -1319,7 +1319,7 @@ function openApiKeyModal(onSaved) {
 // ---------- shareable match card ----------
 // Renders the fit result as a downloadable/shareable PNG (canvas, drawn
 // client-side — no server, no image-generation API). This is the app's
-// main growth lever: the shared image doubles as an ad for Hotelify.
+// main growth lever: the shared image doubles as an ad for Travelify.
 
 function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "hotel";
@@ -1396,7 +1396,7 @@ function buildBadgeCanvas(badge) {
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.font = font(700, 48);
-  ctx.fillText("Hotelify", 170, 147);
+  ctx.fillText("Travelify", 170, 147);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
@@ -1424,7 +1424,7 @@ function buildBadgeCanvas(badge) {
 
   ctx.fillStyle = "#7a756c";
   ctx.font = font(500, 34);
-  ctx.fillText("Earn your own badges at Hotelify", W / 2, H - 90);
+  ctx.fillText("Earn your own badges at Travelify", W / 2, H - 90);
 
   return canvas;
 }
@@ -1433,8 +1433,8 @@ function openBadgeShareModal(badge) {
   const canvas = buildBadgeCanvas(badge);
   openCanvasShareModal(canvas, {
     altText: `${badge.label} badge`,
-    filename: `hotelify-badge-${badge.id}.png`,
-    shareText: `I just earned the "${badge.label}" badge on Hotelify! ${badge.emoji}`,
+    filename: `travelify-badge-${badge.id}.png`,
+    shareText: `I just earned the "${badge.label}" badge on Travelify! ${badge.emoji}`,
   });
 }
 
@@ -1484,7 +1484,7 @@ function openCanvasShareModal(canvas, { altText, filename, shareText }) {
         try {
           const file = new File([blob], filename, { type: "image/png" });
           if (navigator.canShare && !navigator.canShare({ files: [file] })) return;
-          await navigator.share({ files: [file], title: "Hotelify", text: shareText });
+          await navigator.share({ files: [file], title: "Travelify", text: shareText });
         } catch (e) {
           // Share sheet dismissed or unsupported — nothing to do.
         }
