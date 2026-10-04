@@ -101,6 +101,11 @@ let sharePlanSuccess = false;
 let communityPlans = [];
 let communityLoading = false;
 let communityError = null;
+let communityView = "latest"; // latest | plans | creators
+let rankingLoading = false;
+let rankingError = null;
+let ranking = { plans: [], creators: [], myRank: null, myLikes: 0 };
+const RECENT_DAYS = 30;
 let communityEngagementError = null;
 let planVotes = {}; // planId -> { up, down, mine: 1 | -1 | 0 }
 let planComments = {}; // planId -> [comment rows]
@@ -561,6 +566,7 @@ async function shareMyPlan() {
 
 async function viewCommunity() {
   step = "community";
+  communityView = "latest";
   communityLoading = true;
   communityError = null;
   render();
@@ -572,6 +578,60 @@ async function viewCommunity() {
   communityLoading = false;
   render();
   await loadEngagement();
+}
+
+async function setCommunityView(view) {
+  communityView = view;
+  render();
+  if (view !== "latest") await loadRanking();
+}
+
+// Ranks are computed in the browser from the public plans and their votes,
+// so no extra database setup is needed beyond the likes tables.
+async function loadRanking() {
+  rankingLoading = true;
+  rankingError = null;
+  render();
+  try {
+    const [plans, votes] = await Promise.all([fetchPublicPlans(500), fetchAllVotes()]);
+    const tally = {};
+    plans.forEach((p) => (tally[p.id] = { up: 0, down: 0, mine: 0 }));
+    votes.forEach((v) => {
+      const t = tally[v.plan_id];
+      if (!t) return;
+      if (v.vote === 1) t.up++;
+      else t.down++;
+      if (currentUser && v.user_id === currentUser.id) t.mine = v.vote;
+    });
+    Object.assign(planVotes, tally);
+
+    const cutoff = Date.now() - RECENT_DAYS * 86400000;
+    const byLikes = (a, b) => tally[b.id].up - tally[a.id].up || tally[a.id].down - tally[b.id].down || new Date(b.created_at) - new Date(a.created_at);
+    const topPlans = plans.filter((p) => new Date(p.created_at).getTime() >= cutoff && tally[p.id].up > 0).sort(byLikes).slice(0, 10);
+
+    const byUser = {};
+    plans.forEach((p) => {
+      const u = byUser[p.user_id] || (byUser[p.user_id] = { user_id: p.user_id, username: p.username, likes: 0, plans: 0, best: null });
+      u.plans++;
+      u.likes += tally[p.id].up;
+      if (!u.best || tally[p.id].up > tally[u.best.id].up) u.best = p;
+    });
+    const sorted = Object.values(byUser).filter((u) => u.likes > 0).sort((a, b) => b.likes - a.likes || b.plans - a.plans);
+    const myIdx = currentUser ? sorted.findIndex((u) => u.user_id === currentUser.id) : -1;
+    ranking = { plans: topPlans, creators: sorted.slice(0, 10), myRank: myIdx === -1 ? null : myIdx + 1, myLikes: myIdx === -1 ? 0 : sorted[myIdx].likes };
+
+    try {
+      const { comments } = await fetchPlanEngagement(topPlans.map((p) => p.id));
+      topPlans.forEach((p) => (planComments[p.id] = []));
+      comments.forEach((c) => planComments[c.plan_id] && planComments[c.plan_id].push(c));
+    } catch (e) {
+      // comments are optional on the ranking view
+    }
+  } catch (e) {
+    rankingError = "Rankings need the likes tables — run the latest supabase/schema.sql in your Supabase SQL Editor.";
+  }
+  rankingLoading = false;
+  render();
 }
 
 async function loadEngagement() {
@@ -803,6 +863,9 @@ const ICON_PATHS = {
   community: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   journal: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
   hotel: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>',
+  trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  crown: '<path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
 };
 
@@ -847,18 +910,7 @@ function renderStep() {
   return "";
 }
 
-function renderCommunityStep() {
-  const header = `
-    <h2 class="step-heading">Community Plans</h2>
-    <p class="rank-sub">Real itineraries written by other travelers.</p>
-  `;
-
-  if (communityLoading) return header + `<div class="empty">Loading…</div>`;
-  if (communityError) return header + `<div class="empty">${escapeHtml(communityError)}</div>`;
-  if (communityPlans.length === 0) return header + `<div class="empty">No shared plans yet — be the first!</div>`;
-
-  const cards = communityPlans
-    .map((p) => {
+function planCardHtml(p, rank) {
       const theme = THEME_META[p.theme_key];
       const v = planVotes[p.id] || { up: 0, down: 0, mine: 0 };
       const comments = planComments[p.id] || [];
@@ -884,9 +936,9 @@ function renderCommunityStep() {
           </form>
         </div>`
         : "";
-      return `
+  return `
       <li class="plan-card">
-        <div class="rank-name">${theme ? theme.emoji : ""} ${escapeHtml(p.hotel_name)}</div>
+        <div class="plan-card-head">${rank ? `<span class="rank-chip rank-${rank <= 3 ? rank : "n"}">${rank}</span>` : ""}<div class="rank-name">${theme ? theme.emoji : ""} ${escapeHtml(p.hotel_name)}</div></div>
         <div class="rank-sub">${escapeHtml(p.city)} · by ${escapeHtml(p.username)} · ${p.score}% ${theme ? theme.label : ""} fit</div>
         <p class="rank-sub plan-card-text">${escapeHtml(p.plan_text)}</p>
         <div class="engage-row">
@@ -896,9 +948,57 @@ function renderCommunityStep() {
         </div>
         ${commentBox}
       </li>`;
+}
+
+function renderCommunityTabs() {
+  const t = (key, iconName, label) =>
+    `<button class="tab-btn ${communityView === key ? "tab-active" : ""}" data-community-view="${key}">${icon(iconName)}${label}</button>`;
+  return `<div class="tabs">${t("latest", "clock", "Latest")}${t("plans", "trophy", "Top plans")}${t("creators", "crown", "Top creators")}</div>`;
+}
+
+function renderRanking() {
+  if (rankingLoading) return `<div class="empty">Loading rankings…</div>`;
+  if (rankingError) return `<p class="rank-sub plan-error">${escapeHtml(rankingError)}</p>`;
+
+  if (communityView === "plans") {
+    const intro = `<p class="rank-sub">Most liked plans from the last ${RECENT_DAYS} days.</p>`;
+    if (!ranking.plans.length) return intro + `<div class="empty">No liked plans yet this month. Share one and get it liked!</div>`;
+    return intro + `<ul class="rank-list">${ranking.plans.map((p, i) => planCardHtml(p, i + 1)).join("")}</ul>`;
+  }
+
+  const intro = `<p class="rank-sub">Creators ranked by total likes on their public plans.</p>`;
+  if (!ranking.creators.length) return intro + `<div class="empty">No likes yet. Be the first creator on the board!</div>`;
+  const mine = currentUser && ranking.myRank ? `<div class="my-rank">Your rank: <strong>#${ranking.myRank}</strong> · ${ranking.myLikes} like${ranking.myLikes === 1 ? "" : "s"}</div>` : "";
+  const rows = ranking.creators
+    .map((u, i) => {
+      const me = currentUser && u.user_id === currentUser.id;
+      return `
+      <li class="creator-row ${me ? "creator-me" : ""}">
+        <span class="rank-chip rank-${i < 3 ? i + 1 : "n"}">${i + 1}</span>
+        <div class="rank-info">
+          <div class="rank-name">${escapeHtml(u.username)}${me ? ` <span class="you-tag">You</span>` : ""}</div>
+          <div class="rank-sub">${u.plans} plan${u.plans === 1 ? "" : "s"}${u.best ? ` · top: ${escapeHtml(u.best.hotel_name)}` : ""}</div>
+        </div>
+        <span class="likes-pill">👍 ${u.likes}</span>
+      </li>`;
     })
     .join("");
+  return intro + mine + `<ul class="rank-list">${rows}</ul>`;
+}
 
+function renderCommunityStep() {
+  const header = `
+    <h2 class="step-heading">Community</h2>
+    ${renderCommunityTabs()}
+  `;
+
+  if (communityView !== "latest") return header + renderRanking();
+
+  if (communityLoading) return header + `<div class="empty">Loading…</div>`;
+  if (communityError) return header + `<div class="empty">${escapeHtml(communityError)}</div>`;
+  if (communityPlans.length === 0) return header + `<div class="empty">No shared plans yet — be the first!</div>`;
+
+  const cards = communityPlans.map((p) => planCardHtml(p)).join("");
   const engageNote = communityEngagementError ? `<p class="rank-sub plan-error">${escapeHtml(communityEngagementError)}</p>` : "";
   return header + engageNote + `<ul class="rank-list">${cards}</ul>`;
 }
@@ -1590,6 +1690,10 @@ function bindEvents() {
       planCheckError = null;
       render();
     });
+  });
+
+  root.querySelectorAll("[data-community-view]").forEach((btn) => {
+    btn.addEventListener("click", () => setCommunityView(btn.dataset.communityView));
   });
 
   root.querySelectorAll("[data-vote]").forEach((btn) => {

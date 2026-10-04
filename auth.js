@@ -134,3 +134,18 @@ async function deletePlanComment(commentId) {
   const { error } = await supabaseClient.from("plan_comments").delete().eq("id", commentId);
   if (error) throw error;
 }
+
+// Every vote, paged past the 1000-row API limit, for building rankings.
+async function fetchAllVotes() {
+  const rows = [];
+  for (let page = 0; page < 10; page++) {
+    const { data, error } = await supabaseClient
+      .from("plan_votes")
+      .select("plan_id, user_id, vote")
+      .range(page * 1000, page * 1000 + 999);
+    if (error) throw error;
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  return rows;
+}
