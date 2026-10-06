@@ -160,3 +160,20 @@ create policy "Users can comment as themselves"
   on public.plan_comments for insert with check (auth.uid() = user_id);
 create policy "Users can delete their own comments"
   on public.plan_comments for delete using (auth.uid() = user_id);
+
+
+-- ---------------------------------------------------------------------
+-- Feed: public journals. Run this section once in the Supabase SQL Editor.
+-- Journals stay private unless the owner turns on "Public journal"; then
+-- anyone they are followed by (in practice, anyone) can read their trips.
+-- ---------------------------------------------------------------------
+alter table public.profiles add column if not exists journal_public boolean not null default false;
+
+create policy "Public journals are viewable by everyone"
+  on public.journal_entries for select
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = journal_entries.user_id and p.journal_public
+    )
+  );

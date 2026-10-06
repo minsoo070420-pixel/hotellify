@@ -149,3 +149,64 @@ async function fetchAllVotes() {
   }
   return rows;
 }
+
+// ---------- following + public journals (Feed) ----------
+
+async function fetchFollowing(userId) {
+  const { data, error } = await supabaseClient.from("follows").select("followee_id").eq("follower_id", userId);
+  if (error) throw error;
+  return data.map((r) => r.followee_id);
+}
+
+async function followUser(userId, followeeId) {
+  const { error } = await supabaseClient
+    .from("follows")
+    .upsert({ follower_id: userId, followee_id: followeeId }, { onConflict: "follower_id,followee_id" });
+  if (error) throw error;
+}
+
+async function unfollowUser(userId, followeeId) {
+  const { error } = await supabaseClient.from("follows").delete().eq("follower_id", userId).eq("followee_id", followeeId);
+  if (error) throw error;
+}
+
+async function fetchProfiles(ids) {
+  if (!ids.length) return [];
+  const { data, error } = await supabaseClient.from("profiles").select("id, username").in("id", ids);
+  if (error) throw error;
+  return data;
+}
+
+async function fetchMyProfile(userId) {
+  const { data, error } = await supabaseClient.from("profiles").select("journal_public").eq("id", userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function setJournalPublic(userId, isPublic) {
+  const { error } = await supabaseClient.from("profiles").update({ journal_public: isPublic }).eq("id", userId);
+  if (error) throw error;
+}
+
+// Row-level security only returns entries from people who made their journal public.
+async function fetchFeedEntries(userIds, limit) {
+  if (!userIds.length) return [];
+  const { data, error } = await supabaseClient
+    .from("journal_entries")
+    .select("*")
+    .in("user_id", userIds)
+    .order("created_at", { ascending: false })
+    .limit(limit || 60);
+  if (error) throw error;
+  return data.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    hotelId: row.hotel_id,
+    city: row.city,
+    hotelName: row.hotel_name,
+    themeKey: row.theme_key,
+    score: row.score,
+    verdict: row.verdict,
+    timestamp: new Date(row.created_at).getTime(),
+  }));
+}

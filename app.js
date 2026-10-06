@@ -85,6 +85,8 @@ let planCheckNotes = "";
 let planCheckLoading = false;
 let planCheckError = null;
 let planCheckResult = null;
+// How the traveler wants to get between stops: "auto" | "transit" | "taxi".
+let planTransport = "auto";
 
 // ---------- accounts (Supabase) ----------
 // Falls back to the existing guest/localStorage journal untouched when
@@ -112,18 +114,33 @@ let planComments = {}; // planId -> [comment rows]
 let expandedComments = new Set();
 let commentDrafts = {};
 
+// Following + Feed (public journals of people you follow).
+let followingIds = new Set();
+let followNames = {}; // userId -> username
+let followError = null;
+let feedEntries = [];
+let feedLoading = false;
+let feedError = null;
+let journalPublic = null; // null = unknown / not loaded
+let journalPublicError = null;
+
 async function initAuth() {
   if (!isSupabaseConfigured()) return;
   currentUser = await getCurrentUser();
-  if (currentUser) await loadAccountJournal();
+  if (currentUser) {
+    await loadAccountJournal();
+    await loadSocial();
+  }
   render();
   supabaseClient.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session ? session.user : null;
     if (currentUser) {
       await loadAccountJournal();
+      await loadSocial();
     } else {
       journalSource = "guest";
       state = loadState();
+      resetSocial();
     }
     render();
   });
@@ -135,6 +152,107 @@ async function loadAccountJournal() {
     journalSource = "account";
   } catch (e) {
     console.error("Failed to load account journal", e);
+  }
+}
+
+function resetSocial() {
+  followingIds = new Set();
+  followNames = {};
+  feedEntries = [];
+  feedError = null;
+  followError = null;
+  journalPublic = null;
+  journalPublicError = null;
+}
+
+// Who I follow and whether my own journal is public. Failures (e.g. the
+// database update hasn't been run yet) are shown where they matter.
+async function loadSocial() {
+  try {
+    followingIds = new Set(await fetchFollowing(currentUser.id));
+    const profiles = await fetchProfiles([...followingIds]);
+    profiles.forEach((p) => (followNames[p.id] = p.username));
+  } catch (e) {
+    console.error("Failed to load following", e);
+  }
+  try {
+    const profile = await fetchMyProfile(currentUser.id);
+    journalPublic = !!(profile && profile.journal_public);
+    journalPublicError = null;
+  } catch (e) {
+    journalPublic = null;
+    journalPublicError = "Public journals need a database update — run the latest supabase/schema.sql in your Supabase SQL Editor.";
+  }
+}
+
+async function toggleFollow(userId, username) {
+  if (!currentUser) {
+    openAuthModal("signin");
+    return;
+  }
+  const was = followingIds.has(userId);
+  if (was) followingIds.delete(userId);
+  else {
+    followingIds.add(userId);
+    if (username) followNames[userId] = username;
+  }
+  followError = null;
+  render();
+  try {
+    if (was) await unfollowUser(currentUser.id, userId);
+    else await followUser(currentUser.id, userId);
+    if (step === "feed") await loadFeed();
+  } catch (e) {
+    if (was) followingIds.add(userId);
+    else followingIds.delete(userId);
+    followError = "Couldn't update follow. Try again.";
+    render();
+  }
+}
+
+async function viewFeed() {
+  step = "feed";
+  render();
+  if (!currentUser) return;
+  if (!communityPlans.length) {
+    try {
+      communityPlans = await fetchPublicPlans(50);
+    } catch (e) {
+      // suggestions are optional
+    }
+  }
+  await loadFeed();
+}
+
+async function loadFeed() {
+  if (!currentUser) return;
+  feedLoading = true;
+  feedError = null;
+  render();
+  try {
+    const ids = [...followingIds];
+    const [entries, profiles] = await Promise.all([fetchFeedEntries(ids, 60), fetchProfiles(ids)]);
+    profiles.forEach((p) => (followNames[p.id] = p.username));
+    feedEntries = entries;
+  } catch (e) {
+    feedEntries = [];
+    feedError = "Couldn't load the feed. If this keeps happening, run the latest supabase/schema.sql in your Supabase SQL Editor.";
+  }
+  feedLoading = false;
+  render();
+}
+
+async function toggleJournalPublic() {
+  if (!currentUser || journalPublic === null) return;
+  const next = !journalPublic;
+  journalPublic = next;
+  render();
+  try {
+    await setJournalPublic(currentUser.id, next);
+  } catch (e) {
+    journalPublic = !next;
+    journalPublicError = "Couldn't update your journal privacy. Try again.";
+    render();
   }
 }
 
@@ -306,8 +424,14 @@ async function evaluateCustomItinerary(hotel, themeKey, days) {
   const dayLines = days
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
     .join("\n");
-  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, the best way to get between the two stops, and likely traffic. Do NOT default to taxi. Pick the most sensible mode for THIS city and distance: walking for nearby stops; public transit (subway, metro, bus, train) in cities where it's fast, reliable and safe for visitors, such as New York, Washington DC, London, Paris, Tokyo, Singapore, Hong Kong, Berlin, Boston, Chicago; and rideshare/taxi/driving only where transit is poor, slow, or has real safety concerns for visitors, such as Los Angeles. When both transit and a car are reasonable, mention both briefly with rough times. Name the specific line or mode when you know it.\n- For each day, also judge the ORDER of its stops. If a different order would cut backtracking, walking or traffic, or suit time of day (e.g. morning-only markets or museums first, sunset viewpoints and nightlife last), set "betterOrder" to the SAME stop names, spelled exactly as given, in the better sequence, and "orderNote" to a short reason (under 25 words). If the current order already works, set "betterOrder" to null and "orderNote" to a very short confirmation. Never add, drop or rename stops in betterOrder.
-- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the most sensible transport (transit, rideshare or driving, per the guidance above) for far-apart ones (rough estimates).\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"..."}],"betterOrder":["stop names"] or null,"orderNote":"...","walkingKm":number,"kcal":number}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
+  const transportRule =
+    planTransport === "transit"
+      ? "The traveler wants to use public transit (subway, metro, bus, train) for any leg too far to walk. Assume transit wherever it exists in this city; only mention a car where transit truly isn't available."
+      : planTransport === "taxi"
+      ? "The traveler prefers taxi/rideshare for any leg too far to walk. Assume taxi times and fares. EXCEPTION: in New York City (and other cities where the subway or metro is clearly faster, such as Washington DC, London, Paris, Tokyo), do NOT recommend a taxi — traffic makes it slow and costly. For those legs, say the subway/metro is faster and cheaper, give its time and cost instead, and mark the leg \"review\"."
+      : "No preference: pick the most sensible mode per leg for this city (see guidance above).";
+  const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, the best way to get between the two stops, and likely traffic. Do NOT default to taxi. Pick the most sensible mode for THIS city and distance: walking for nearby stops; public transit (subway, metro, bus, train) in cities where it's fast, reliable and safe for visitors, such as New York, Washington DC, London, Paris, Tokyo, Singapore, Hong Kong, Berlin, Boston, Chicago; and rideshare/taxi/driving only where transit is poor, slow, or has real safety concerns for visitors, such as Los Angeles. When both transit and a car are reasonable, mention both briefly with rough times. Name the specific line or mode when you know it. Never recommend a taxi or rideshare in New York City. TRANSPORT PREFERENCE: ${transportRule}\n- Also for each leg give "mode" (the ONE mode you assumed: walk, subway, bus, train, taxi or car), "minutes" (realistic door-to-door travel time as a number) and "cost" (rough per-person cost in USD as a short string such as "$3" or "$14"; use "free" for walking).\n- For each day, also judge the ORDER of its stops. If a different order would cut backtracking, walking or traffic, or suit time of day (e.g. morning-only markets or museums first, sunset viewpoints and nightlife last), set "betterOrder" to the SAME stop names, spelled exactly as given, in the better sequence, and "orderNote" to a short reason (under 25 words). If the current order already works, set "betterOrder" to null and "orderNote" to a very short confirmation. Never add, drop or rename stops in betterOrder.
+- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the transport described above for far-apart ones (rough estimates). Also give the day's total travel time ("travelMinutes", number, all legs combined) and total transport cost ("travelCost", short USD string such as "$9" or "free").\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"...","mode":"walk|subway|bus|train|taxi|car","minutes":number,"cost":"$3"}],"betterOrder":["stop names"] or null,"orderNote":"...","walkingKm":number,"kcal":number,"travelMinutes":number,"travelCost":"$9"}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number,"totalTravelCost":"$27"}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
   const text = await callGemini(prompt, { json: true });
   try {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -412,7 +536,7 @@ function saveSession() {
   try {
     localStorage.setItem(
       SESSION_KEY,
-      JSON.stringify({ selectedCity, selectedTheme, selectedHotel, step: ["city", "theme", "hotel", "answer"].includes(step) ? step : planStep(), answerTab, planCheckDays, planCheckNotes, planCheckResult })
+      JSON.stringify({ selectedCity, selectedTheme, selectedHotel, step: ["city", "theme", "hotel", "answer"].includes(step) ? step : planStep(), answerTab, planCheckDays, planCheckNotes, planCheckResult, planTransport })
     );
   } catch (e) {
     // storage unavailable — progress just won't persist
@@ -430,10 +554,178 @@ function restoreSession() {
     if (Array.isArray(saved.planCheckDays) && saved.planCheckDays.length) planCheckDays = saved.planCheckDays;
     planCheckNotes = saved.planCheckNotes || "";
     planCheckResult = saved.planCheckResult || null;
+    planTransport = ["auto", "transit", "taxi"].includes(saved.planTransport) ? saved.planTransport : "auto";
     step = planStep();
   } catch (e) {
     // ignore a corrupt saved session
   }
+}
+
+// ---------- trip photos ----------
+// After a trip, travelers can attach photos to each stop of their plan.
+// Photos are resized in the browser and kept only on this device
+// (IndexedDB), grouped by hotel + stop name so they survive reloads and
+// come back if the same stop is added again.
+
+const PHOTO_DB = "travelify_photos";
+const PHOTO_STORE = "photos";
+const MAX_PHOTOS_PER_STOP = 12;
+let photoCache = {}; // stopKey -> [{ id, thumbUrl }]
+let photoNotice = null;
+
+function openPhotoDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error("IndexedDB unavailable"));
+    const req = indexedDB.open(PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      const store = req.result.createObjectStore(PHOTO_STORE, { keyPath: "id" });
+      store.createIndex("hotelId", "hotelId");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function photoDbRequest(mode, fn) {
+  return openPhotoDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, mode);
+        const req = fn(tx.objectStore(PHOTO_STORE));
+        tx.oncomplete = () => {
+          db.close();
+          resolve(req && req.result);
+        };
+        tx.onerror = tx.onabort = () => {
+          db.close();
+          reject(tx.error);
+        };
+      })
+  );
+}
+
+function photoHotelKey() {
+  return selectedHotel ? String(selectedHotel.id || selectedHotel.name) : null;
+}
+
+function stopPhotoKey(name) {
+  return String(name).trim().toLowerCase();
+}
+
+// Reloads the thumbnails for the current hotel (and clears them when there isn't one).
+async function loadHotelPhotos() {
+  Object.values(photoCache).forEach((list) => list.forEach((p) => URL.revokeObjectURL(p.thumbUrl)));
+  photoCache = {};
+  const hotelKey = photoHotelKey();
+  if (!hotelKey) return;
+  try {
+    const rows = await photoDbRequest("readonly", (store) => store.index("hotelId").getAll(hotelKey));
+    if (hotelKey !== photoHotelKey()) return; // hotel changed while loading
+    rows.sort((a, b) => a.createdAt - b.createdAt);
+    rows.forEach((r) => {
+      (photoCache[r.stopKey] = photoCache[r.stopKey] || []).push({ id: r.id, thumbUrl: URL.createObjectURL(r.thumb) });
+    });
+    render();
+  } catch (e) {
+    // storage unavailable — photos just won't persist
+  }
+}
+
+function resizeToBlob(bitmap, maxSide, quality) {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("encode failed"))), "image/jpeg", quality)
+  );
+}
+
+async function processPhotoFile(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    return { full: await resizeToBlob(bitmap, 1600, 0.82), thumb: await resizeToBlob(bitmap, 360, 0.75) };
+  } finally {
+    if (bitmap.close) bitmap.close();
+  }
+}
+
+async function addStopPhotos(stopName, fileList) {
+  const hotelKey = photoHotelKey();
+  if (!hotelKey) return;
+  const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
+  const key = stopPhotoKey(stopName);
+  const room = Math.max(0, MAX_PHOTOS_PER_STOP - (photoCache[key] || []).length);
+  const picked = files.slice(0, room);
+  let failed = 0;
+  for (const file of picked) {
+    try {
+      const { full, thumb } = await processPhotoFile(file);
+      const rec = { id: "ph-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8), hotelId: hotelKey, stopKey: key, full, thumb, createdAt: Date.now() };
+      await photoDbRequest("readwrite", (store) => store.put(rec));
+      if (hotelKey !== photoHotelKey()) return;
+      (photoCache[key] = photoCache[key] || []).push({ id: rec.id, thumbUrl: URL.createObjectURL(thumb) });
+    } catch (e) {
+      failed++;
+    }
+  }
+  const notes = [];
+  if (files.length > picked.length) notes.push(`Up to ${MAX_PHOTOS_PER_STOP} photos per stop.`);
+  if (failed) notes.push(`${failed} photo${failed > 1 ? "s" : ""} couldn't be added (unsupported format or storage full).`);
+  photoNotice = notes.length ? notes.join(" ") : null;
+  render();
+}
+
+async function removeStopPhoto(photoId) {
+  try {
+    await photoDbRequest("readwrite", (store) => store.delete(photoId));
+  } catch (e) {
+    return;
+  }
+  Object.keys(photoCache).forEach((key) => {
+    photoCache[key] = photoCache[key].filter((p) => {
+      if (p.id !== photoId) return true;
+      URL.revokeObjectURL(p.thumbUrl);
+      return false;
+    });
+    if (!photoCache[key].length) delete photoCache[key];
+  });
+  render();
+}
+
+async function openPhotoLightbox(photoId) {
+  let rec;
+  try {
+    rec = await photoDbRequest("readonly", (store) => store.get(photoId));
+  } catch (e) {
+    return;
+  }
+  if (!rec) return;
+  const url = URL.createObjectURL(rec.full);
+  const overlay = document.createElement("div");
+  overlay.className = "share-modal-overlay";
+  overlay.innerHTML = `
+    <div class="share-modal photo-lightbox">
+      <button class="icon-btn share-modal-close" id="photo-close">✕ Close</button>
+      <div class="share-canvas-wrap"><img src="${url}" alt="Trip photo" /></div>
+      <div class="share-modal-actions">
+        <button class="pill-btn ghost" id="photo-delete">Delete photo</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => {
+    URL.revokeObjectURL(url);
+    overlay.remove();
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  document.getElementById("photo-close").addEventListener("click", close);
+  document.getElementById("photo-delete").addEventListener("click", async () => {
+    close();
+    await removeStopPhoto(photoId);
+  });
 }
 
 // ---------- navigation ----------
@@ -467,6 +759,7 @@ function chooseHotel(hotel, { record = true } = {}) {
     planCheckNotes = "";
     planCheckResult = null;
     planCheckError = null;
+    loadHotelPhotos();
   }
   const fit = evaluateFit(hotel, selectedTheme);
   if (record) recordTripMatch({
@@ -499,6 +792,7 @@ function planNewTrip() {
   planCheckNotes = "";
   planCheckResult = null;
   planCheckError = null;
+  loadHotelPhotos();
   step = "city";
   render();
 }
@@ -867,6 +1161,8 @@ const ICON_PATHS = {
   crown: '<path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/>',
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  feed: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/>',
 };
 
 function icon(name) {
@@ -874,12 +1170,13 @@ function icon(name) {
 }
 
 function renderBottomNav() {
-  const active = step === "community" ? "community" : step === "journal" ? "journal" : "plan";
+  const active = step === "community" ? "community" : step === "feed" ? "feed" : step === "journal" ? "journal" : "plan";
   const item = (key, icon, label) =>
     `<button class="nav-item ${active === key ? "nav-active" : ""}" data-nav="${key}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`;
   return `<nav class="bottom-nav">
     ${item("plan", icon("plan"), "Plan")}
     ${isSupabaseConfigured() ? item("community", icon("community"), "Community") : ""}
+    ${isSupabaseConfigured() ? item("feed", icon("feed"), "Feed") : ""}
     ${item("journal", icon("journal"), "Journal")}
   </nav>`;
 }
@@ -907,7 +1204,14 @@ function renderStep() {
   if (step === "answer") return renderAnswerStep();
   if (step === "journal") return renderJournal();
   if (step === "community") return renderCommunityStep();
+  if (step === "feed") return renderFeedStep();
   return "";
+}
+
+function followButton(userId, username) {
+  if (!isSupabaseConfigured() || (currentUser && currentUser.id === userId)) return "";
+  const on = followingIds.has(userId);
+  return `<button type="button" class="follow-btn ${on ? "follow-on" : ""}" data-follow="${userId}" data-follow-name="${escapeHtml(username)}">${on ? "Following" : "Follow"}</button>`;
 }
 
 function planCardHtml(p, rank) {
@@ -939,7 +1243,7 @@ function planCardHtml(p, rank) {
   return `
       <li class="plan-card">
         <div class="plan-card-head">${rank ? `<span class="rank-chip rank-${rank <= 3 ? rank : "n"}">${rank}</span>` : ""}<div class="rank-name">${theme ? theme.emoji : ""} ${escapeHtml(p.hotel_name)}</div></div>
-        <div class="rank-sub">${escapeHtml(p.city)} · by ${escapeHtml(p.username)} · ${p.score}% ${theme ? theme.label : ""} fit</div>
+        <div class="rank-sub">${escapeHtml(p.city)} · by ${escapeHtml(p.username)} ${followButton(p.user_id, p.username)} · ${p.score}% ${theme ? theme.label : ""} fit</div>
         <p class="rank-sub plan-card-text">${escapeHtml(p.plan_text)}</p>
         <div class="engage-row">
           <button type="button" class="engage-btn ${v.mine === 1 ? "engage-active-up" : ""}" data-vote="${p.id}|1">👍 ${v.up}</button>
@@ -979,6 +1283,7 @@ function renderRanking() {
           <div class="rank-name">${escapeHtml(u.username)}${me ? ` <span class="you-tag">You</span>` : ""}</div>
           <div class="rank-sub">${u.plans} plan${u.plans === 1 ? "" : "s"}${u.best ? ` · top: ${escapeHtml(u.best.hotel_name)}` : ""}</div>
         </div>
+        ${followButton(u.user_id, u.username)}
         <span class="likes-pill">👍 ${u.likes}</span>
       </li>`;
     })
@@ -1001,6 +1306,66 @@ function renderCommunityStep() {
   const cards = communityPlans.map((p) => planCardHtml(p)).join("");
   const engageNote = communityEngagementError ? `<p class="rank-sub plan-error">${escapeHtml(communityEngagementError)}</p>` : "";
   return header + engageNote + `<ul class="rank-list">${cards}</ul>`;
+}
+
+function renderFeedStep() {
+  const header = `<h2 class="step-heading">Feed</h2><p class="rank-sub">Trips from travelers you follow.</p>`;
+  if (!currentUser) {
+    return header + `<div class="empty">Sign in to follow travelers and see their trips here.<br /><br /><button class="pill-btn" data-feed-signin>Sign in</button></div>`;
+  }
+  const errorNote = followError ? `<p class="rank-sub plan-error">${escapeHtml(followError)}</p>` : "";
+
+  const followingList = followingIds.size
+    ? `<details class="share-details">
+        <summary>Following (${followingIds.size})</summary>
+        <ul class="rank-list">${[...followingIds]
+          .map(
+            (id) => `<li class="creator-row"><div class="rank-info"><div class="rank-name">${escapeHtml(followNames[id] || "Traveler")}</div></div>${followButton(id, followNames[id] || "Traveler")}</li>`
+          )
+          .join("")}</ul>
+      </details>`
+    : "";
+
+  let body;
+  if (feedLoading) {
+    body = `<div class="empty">Loading…</div>`;
+  } else if (feedError) {
+    body = `<p class="rank-sub plan-error">${escapeHtml(feedError)}</p>`;
+  } else if (!followingIds.size) {
+    body = `<div class="empty">You're not following anyone yet. Follow travelers below, or tap Follow on a plan in Community.</div>`;
+  } else if (!feedEntries.length) {
+    body = `<div class="empty">Nothing here yet. The travelers you follow haven't made their journal public or added any trips.</div>`;
+  } else {
+    body = `<ul class="rank-list">${feedEntries
+      .map((j, idx) => {
+        const theme = THEME_META[j.themeKey] || { emoji: "🧳", label: "" };
+        const color = j.score >= 75 ? "#2e7d4f" : j.score >= 50 ? "#b8860b" : "#c0392b";
+        return `
+        <li><button class="rank-row" data-open-feed="${idx}">
+          <div class="rank-info">
+            <div class="rank-sub"><strong>${escapeHtml(followNames[j.userId] || "Traveler")}</strong> · ${timeAgo(j.timestamp)}</div>
+            <div class="rank-name">${theme.emoji} ${escapeHtml(j.hotelName)}</div>
+            <div class="rank-sub">${escapeHtml(j.city)}${theme.label ? " · " + theme.label : ""}</div>
+          </div>
+          <span class="badge" style="background:${color}">${j.score}%</span>
+        </button></li>`;
+      })
+      .join("")}</ul>`;
+  }
+
+  // People to follow: authors of recent community plans I don't follow yet.
+  const seen = new Set();
+  const suggestions = communityPlans
+    .filter((p) => p.user_id !== currentUser.id && !followingIds.has(p.user_id) && !seen.has(p.user_id) && seen.add(p.user_id))
+    .slice(0, 8);
+  const suggestionBlock = suggestions.length
+    ? `<div class="detail-label feed-suggest-label">Travelers to follow</div>
+       <ul class="rank-list">${suggestions
+         .map((p) => `<li class="creator-row"><div class="rank-info"><div class="rank-name">${escapeHtml(p.username)}</div><div class="rank-sub">Shared a plan for ${escapeHtml(p.city)}</div></div>${followButton(p.user_id, p.username)}</li>`)
+         .join("")}</ul>`
+    : "";
+
+  return header + errorNote + followingList + body + suggestionBlock;
 }
 
 function renderStepper(current) {
@@ -1198,8 +1563,29 @@ function renderPlanCheckSection() {
         </div>`
       : "";
 
+  const MODE_ICON = { walk: "🚶", subway: "🚇", bus: "🚌", train: "🚆", taxi: "🚕", car: "🚗" };
+  const legMeta = (leg) => {
+    const parts = [];
+    const mode = String(leg.mode || "").toLowerCase();
+    if (mode) parts.push(`${MODE_ICON[mode] || "➡️"} ${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
+    if (leg.minutes) parts.push(`~${escapeHtml(String(leg.minutes))} min`);
+    if (leg.cost) parts.push(escapeHtml(String(leg.cost).startsWith("~") || String(leg.cost).toLowerCase() === "free" ? String(leg.cost) : "~" + String(leg.cost)));
+    return parts.length ? `<div class="leg-meta">${parts.join(" · ")}</div>` : "";
+  };
   const legFeedback = (leg) =>
-    leg ? `<div class="feedback-card feedback-leg ${verdictClass(leg.verdict)}"><div class="feedback-text">${leg.verdict === "good" ? "✅" : "⚠️"} ${escapeHtml(leg.feedback || "")}</div></div>` : "";
+    leg ? `<div class="feedback-card feedback-leg ${verdictClass(leg.verdict)}">${legMeta(leg)}<div class="feedback-text">${leg.verdict === "good" ? "✅" : "⚠️"} ${escapeHtml(leg.feedback || "")}</div></div>` : "";
+
+  const photoStrip = (stopName, i, si) => {
+    const photos = photoCache[stopPhotoKey(stopName)] || [];
+    const thumbs = photos
+      .map((p) => `<button type="button" class="photo-thumb" data-open-photo="${p.id}"><img src="${p.thumbUrl}" alt="Photo from ${escapeHtml(stopName)}" /></button>`)
+      .join("");
+    const addBtn =
+      photos.length >= MAX_PHOTOS_PER_STOP
+        ? ""
+        : `<label class="photo-add">${icon("camera")}<span>${photos.length ? "Add" : "Add photos"}</span><input type="file" accept="image/*" multiple hidden data-photo-input="${i}|${si}" /></label>`;
+    return `<div class="photo-strip">${thumbs}${addBtn}</div>`;
+  };
 
   const dayBlocks = planCheckDays
     .map((stops, i) => {
@@ -1215,7 +1601,8 @@ function renderPlanCheckSection() {
                 <button type="button" class="stop-move-btn" data-move-stop="${i}|${si}|-1" ${si === 0 ? "disabled" : ""} title="Move earlier">▲</button>
                 <button type="button" class="stop-move-btn" data-move-stop="${i}|${si}|1" ${si === stops.length - 1 ? "disabled" : ""} title="Move later">▼</button>
               </span>
-              ${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span></div>
+              ${escapeHtml(s)} <button type="button" class="stop-chip-remove" data-remove-stop="${i}-${si}">✕</button></span>
+              ${photoStrip(s, i, si)}</div>
             <div class="feedback-col">${planCheckLoading ? "" : stopFeedback(dr && dr.stops && dr.stops[si])}</div>
           </div>`;
           const hasNext = si < stops.length - 1;
@@ -1233,7 +1620,7 @@ function renderPlanCheckSection() {
       const dayAnyReview = dr && [...(dr.stops || []), ...(dr.legs || [])].some((x) => x && x.verdict !== "good");
       const dayStats =
         dr && !planCheckLoading
-          ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal</div></div>`
+          ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal${dr.travelMinutes ? ` · ~${escapeHtml(String(dr.travelMinutes))} min getting around` : ""}${dr.travelCost ? ` · ${escapeHtml(String(dr.travelCost).startsWith("~") || String(dr.travelCost).toLowerCase() === "free" ? String(dr.travelCost) : "~" + String(dr.travelCost))} transport` : ""}</div></div>`
           : "";
 
       let orderRow = "";
@@ -1286,6 +1673,7 @@ function renderPlanCheckSection() {
         ${keywordChips(structured.keywords)}
         ${structured.summary ? `<div>${escapeHtml(structured.summary)}</div>` : ""}
         ${structured.totalKcal ? `<div class="plan-summary-total">Total: ~${escapeHtml(String(structured.totalKcal))} kcal over ${planCheckDays.length} day${planCheckDays.length > 1 ? "s" : ""} (rough estimate)</div>` : ""}
+        ${structured.totalTravelCost ? `<div class="plan-summary-total">Getting around: ~${escapeHtml(String(structured.totalTravelCost).replace(/^~/, ""))} total per person (rough estimate)</div>` : ""}
       </div>`;
   }
 
@@ -1307,7 +1695,14 @@ function renderPlanCheckSection() {
   return `
   <div class="detail-section plan-section">
     <div class="detail-label">📍 Check My Plan</div>
-    <p class="rank-sub">Add the places you want to visit each day, then tap Check My Plan. You'll get feedback on every stop and the order, plus walking and calories.</p>
+    <p class="rank-sub">Add the places you want to visit each day, then tap Check My Plan. You'll get feedback on every stop and the order, plus walking and calories. After your trip, add photos to any stop — they stay on this device.</p>
+    ${photoNotice ? `<p class="rank-sub plan-error">${escapeHtml(photoNotice)}</p>` : ""}
+    <div class="detail-label transport-label">Getting around</div>
+    <div class="chip-row transport-row">
+      ${[["auto", "✨ Best for the city"], ["transit", "🚇 Subway / transit"], ["taxi", "🚕 Taxi / rideshare"]]
+        .map(([key, label]) => `<button type="button" class="chip ${planTransport === key ? "chip-active" : ""}" data-transport="${key}">${label}</button>`)
+        .join("")}
+    </div>
     ${dayBlocks}
     <button type="button" class="pill-btn ghost" id="add-day-btn">+ Add Day</button>
     <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking… (this can take a little while)" : "🔍 Check My Plan"}</button>
@@ -1612,11 +2007,26 @@ function renderBadgesSection() {
     </div>`;
 }
 
+function renderJournalPrivacy() {
+  if (!isSupabaseConfigured() || !currentUser) return "";
+  if (journalPublicError) return `<p class="rank-sub plan-error">${escapeHtml(journalPublicError)}</p>`;
+  if (journalPublic === null) return "";
+  return `<div class="privacy-card">
+    <div>
+      <div class="rank-name">Public journal</div>
+      <div class="rank-sub">${journalPublic ? "People who follow you can see your trips in their Feed." : "Only you can see your trips. Turn on to share them with followers."}</div>
+    </div>
+    <button type="button" class="switch ${journalPublic ? "switch-on" : ""}" role="switch" aria-checked="${journalPublic}" aria-label="Public journal" id="journal-public-toggle"><span class="switch-knob"></span></button>
+  </div>`;
+}
+
 function renderJournal() {
   const badgesSection = renderBadgesSection();
+  const privacy = renderJournalPrivacy();
   if (state.journal.length === 0) {
     return `
       <h2 class="step-heading">Your Trip Journal</h2>
+      ${privacy}
       ${badgesSection}
       <div class="empty">No trips planned yet. Match your first hotel to start your journal.</div>
     `;
@@ -1639,6 +2049,7 @@ function renderJournal() {
   return `
     <h2 class="step-heading">Your Trip Journal</h2>
     <p class="rank-sub">Tap a trip to open it again.</p>
+    ${privacy}
     ${badgesSection}
     <ul class="rank-list">${rows}</ul>
   `;
@@ -1659,10 +2070,30 @@ function bindEvents() {
     });
   });
 
+  root.querySelectorAll("[data-follow]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleFollow(btn.dataset.follow, btn.dataset.followName));
+  });
+  root.querySelectorAll("[data-open-feed]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const j = feedEntries[Number(btn.dataset.openFeed)];
+      if (!j) return;
+      const hotel = MOCK_HOTELS.find((h) => h.id === j.hotelId) || { id: j.hotelId || makeCustomId(), name: j.hotelName, city: j.city, tags: [] };
+      selectedCity = j.city;
+      selectedTheme = j.themeKey;
+      chooseHotel(hotel, { record: false });
+      window.scrollTo(0, 0);
+    });
+  });
+  const feedSignin = root.querySelector("[data-feed-signin]");
+  if (feedSignin) feedSignin.addEventListener("click", () => openAuthModal("signin"));
+  const journalToggle = document.getElementById("journal-public-toggle");
+  if (journalToggle) journalToggle.addEventListener("click", toggleJournalPublic);
+
   root.querySelectorAll("[data-nav]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const target = btn.dataset.nav;
       if (target === "community") viewCommunity();
+      else if (target === "feed") viewFeed();
       else if (target === "journal") {
         step = "journal";
         render();
@@ -1768,6 +2199,27 @@ function bindEvents() {
 
   const checkPlanBtn = document.getElementById("check-plan-btn");
   if (checkPlanBtn) checkPlanBtn.addEventListener("click", checkMyPlan);
+
+  root.querySelectorAll("[data-transport]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (planTransport === btn.dataset.transport) return;
+      planTransport = btn.dataset.transport;
+      planCheckResult = null;
+      planCheckError = null;
+      render();
+    });
+  });
+
+  root.querySelectorAll("[data-photo-input]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [di, si] = input.dataset.photoInput.split("|").map(Number);
+      const name = planCheckDays[di] && planCheckDays[di][si];
+      if (name && input.files.length) addStopPhotos(name, input.files);
+    });
+  });
+  root.querySelectorAll("[data-open-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => openPhotoLightbox(btn.dataset.openPhoto));
+  });
 
   const addDayBtn = document.getElementById("add-day-btn");
   if (addDayBtn) addDayBtn.addEventListener("click", addPlanCheckDay);
@@ -1884,4 +2336,5 @@ function bindEvents() {
 
 restoreSession();
 render();
+loadHotelPhotos();
 initAuth();

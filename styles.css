@@ -484,10 +484,39 @@ main {
   margin-top: 6px;
 }
 
+/* Keep feedback on the right even on phones: tighter columns, smaller text. */
 @media (max-width: 700px) {
   .plan-row {
-    grid-template-columns: 1fr;
-    gap: 6px;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+    gap: 10px;
+    align-items: start;
+  }
+  .plan-check-day .stop-chip {
+    font-size: 14px;
+    padding: 6px 6px 6px 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .plan-row .feedback-card {
+    padding: 8px 10px;
+  }
+  .plan-row .feedback-text,
+  .plan-row .feedback-stats {
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+  .plan-leg {
+    font-size: 12px;
+    padding-left: 4px;
+    overflow-wrap: anywhere;
+  }
+  .photo-thumb {
+    width: 40px;
+    height: 40px;
+  }
+  .photo-add {
+    min-height: 40px;
+    padding: 0 8px;
   }
 }
 
@@ -1042,3 +1071,116 @@ main {
   border: 1px solid #2e7d4f;
   font-size: 14px;
 }
+
+/* Transport preference + per-leg travel estimates */
+.transport-label { margin-top: 4px; }
+.transport-row { margin-bottom: 14px; }
+.leg-meta {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+  opacity: 0.85;
+}
+
+/* Trip photos on plan stops */
+.photo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.photo-thumb {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+  cursor: pointer;
+}
+.photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 0 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.photo-add:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.photo-add .icon {
+  width: 16px;
+  height: 16px;
+}
+.photo-lightbox .share-canvas-wrap img {
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+/* Follow buttons, feed, public-journal switch */
+.follow-btn {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.follow-btn.follow-on {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--border);
+}
+.feed-suggest-label { margin-top: 22px; }
+.privacy-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+.switch {
+  flex-shrink: 0;
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: #cfc9bf;
+  padding: 3px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.switch-knob {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+.switch-on { background: #2e7d4f; }
+.switch-on .switch-knob { transform: translateX(18px); }
