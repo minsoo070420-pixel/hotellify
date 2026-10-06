@@ -16,23 +16,14 @@
 const STORAGE_KEY = "hotelify_tripmatch_v1";
 const THEME_KEYS = ["romantic", "family", "business", "adventure", "relaxation"];
 
-// Modern mark: a house built from separate green "stick" strokes (a
-// roof chevron, two wall posts, a base) rather than a filled glyph —
-// no background badge, just the line marks, instead of the 🏨 emoji.
+// Simple modern mark: a white map pin on a rounded green tile.
+const LOGO_GREEN = "#2e7d4f";
+const LOGO_PIN_PATH = "M16 6.2c-3.7 0-6.7 2.9-6.7 6.6 0 4.8 6.7 12.9 6.7 12.9s6.7-8.1 6.7-12.9c0-3.7-3-6.6-6.7-6.6z";
 const LOGO_SVG = `
-  <svg width="30" height="30" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="logoGrad" x1="4" y1="6" x2="28" y2="26" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#4ade80"/>
-        <stop offset="1" stop-color="#047857"/>
-      </linearGradient>
-    </defs>
-    <g stroke="url(#logoGrad)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M5 17L16 6L27 17"/>
-      <path d="M10 19.5V26"/>
-      <path d="M22 19.5V26"/>
-      <path d="M8 26H24"/>
-    </g>
+  <svg width="30" height="30" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect width="32" height="32" rx="9" fill="${LOGO_GREEN}"/>
+    <path d="${LOGO_PIN_PATH}" fill="#fff"/>
+    <circle cx="16" cy="12.8" r="2.7" fill="${LOGO_GREEN}"/>
   </svg>
 `;
 
@@ -1844,30 +1835,16 @@ function drawShareLogo(ctx, x, y, size) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
-  const grad = ctx.createLinearGradient(4, 6, 28, 26);
-  grad.addColorStop(0, "#4ade80");
-  grad.addColorStop(1, "#047857");
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 2.75;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.fillStyle = LOGO_GREEN;
   ctx.beginPath();
-  ctx.moveTo(5, 17);
-  ctx.lineTo(16, 6);
-  ctx.lineTo(27, 17);
-  ctx.stroke();
+  ctx.roundRect(0, 0, 32, 32, 9);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fill(new Path2D(LOGO_PIN_PATH));
+  ctx.fillStyle = LOGO_GREEN;
   ctx.beginPath();
-  ctx.moveTo(10, 19.5);
-  ctx.lineTo(10, 26);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(22, 19.5);
-  ctx.lineTo(22, 26);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(8, 26);
-  ctx.lineTo(24, 26);
-  ctx.stroke();
+  ctx.arc(16, 12.8, 2.7, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
