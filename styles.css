@@ -1184,3 +1184,102 @@ main {
 }
 .switch-on { background: #2e7d4f; }
 .switch-on .switch-knob { transform: translateX(18px); }
+
+/* Passport, saved hotels, route link, save heart, use-this-plan */
+.passport {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 14px 16px;
+  margin: 14px 0;
+}
+.passport-persona {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  margin: 2px 0 10px;
+}
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.stat-tile {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px 6px;
+  text-align: center;
+}
+.stat-tile strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  color: #2e7d4f;
+}
+.stat-tile span {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.stamp-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stamp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 84px;
+  padding: 8px 10px;
+  border: 2px dashed #2e7d4f;
+  border-radius: 12px;
+  color: #2e7d4f;
+  transform: rotate(var(--tilt, 0deg));
+}
+.stamp-flag { font-size: 28px; line-height: 1.1; }
+.stamp-name { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+.stamp-sub { font-size: 11px; font-weight: 600; opacity: 0.8; }
+.saved-section { margin: 14px 0; }
+.saved-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+.saved-row .rank-row { flex: 1; min-width: 0; }
+.save-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.save-btn .icon { width: 20px; height: 20px; }
+.save-btn.saved { color: #d6455d; border-color: #d6455d; }
+.save-btn.saved .icon { fill: currentColor; }
+.route-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2e7d4f;
+  text-decoration: none;
+}
+.route-link .icon { width: 16px; height: 16px; }
+.route-link:hover { text-decoration: underline; }
+.use-plan-btn {
+  margin-left: auto;
+  font-weight: 700;
+}

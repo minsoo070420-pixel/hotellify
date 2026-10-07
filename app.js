@@ -497,6 +497,301 @@ function computeEarnedBadges(journal) {
   return BADGE_DEFS.map((b) => ({ ...b, earned: b.check(stats) }));
 }
 
+// ---------- passport, saved hotels, routes, remixed plans ----------
+// Features borrowed from apps people love: a Polarsteps/Spotify-Wrapped style
+// travel passport with a shareable card, a Beli/Airbnb style saved list, a
+// Wanderlog style one-tap route in Maps, and Pinterest style "use this plan".
+
+const COUNTRY_FLAGS = {
+  Argentina: "🇦🇷", Australia: "🇦🇺", Austria: "🇦🇹", Brazil: "🇧🇷", Canada: "🇨🇦", China: "🇨🇳",
+  "Czech Republic": "🇨🇿", Denmark: "🇩🇰", France: "🇫🇷", Germany: "🇩🇪", Greece: "🇬🇷", Hungary: "🇭🇺",
+  Iceland: "🇮🇸", India: "🇮🇳", Indonesia: "🇮🇩", Ireland: "🇮🇪", Italy: "🇮🇹", Japan: "🇯🇵", Mexico: "🇲🇽",
+  Morocco: "🇲🇦", Netherlands: "🇳🇱", Portugal: "🇵🇹", Singapore: "🇸🇬", "South Africa": "🇿🇦",
+  "South Korea": "🇰🇷", Spain: "🇪🇸", Switzerland: "🇨🇭", Thailand: "🇹🇭", Turkey: "🇹🇷", UAE: "🇦🇪",
+  UK: "🇬🇧", USA: "🇺🇸", Vietnam: "🇻🇳",
+};
+
+const TRAVEL_PERSONAS = {
+  romantic: "The Hopeless Romantic",
+  family: "The Family Captain",
+  business: "The Road Warrior",
+  adventure: "The Thrill Seeker",
+  relaxation: "The Zen Traveler",
+};
+
+function countryOfEntry(j) {
+  const byId = j.hotelId && MOCK_HOTELS.find((h) => h.id === j.hotelId);
+  if (byId) return byId.country;
+  const inCity = MOCK_HOTELS.find((h) => h.city === j.city);
+  return inCity ? inCity.country : null;
+}
+
+function computePassport(journal) {
+  const countries = {};
+  const cities = new Set();
+  const themeCounts = {};
+  let scoreSum = 0;
+  let best = null;
+  journal.forEach((j) => {
+    cities.add(j.city);
+    scoreSum += j.score;
+    themeCounts[j.themeKey] = (themeCounts[j.themeKey] || 0) + 1;
+    if (!best || j.score > best.score) best = j;
+    const c = countryOfEntry(j);
+    if (c) {
+      const e = countries[c] || (countries[c] = { country: c, cities: new Set(), trips: 0 });
+      e.cities.add(j.city);
+      e.trips++;
+    }
+  });
+  const topTheme = Object.keys(themeCounts).sort((a, b) => themeCounts[b] - themeCounts[a])[0] || null;
+  return {
+    trips: journal.length,
+    cityCount: cities.size,
+    countries: Object.values(countries).sort((a, b) => b.trips - a.trips || a.country.localeCompare(b.country)),
+    avgScore: journal.length ? Math.round(scoreSum / journal.length) : 0,
+    topTheme,
+    persona: topTheme ? TRAVEL_PERSONAS[topTheme] || null : null,
+    best,
+  };
+}
+
+function renderPassportSection() {
+  if (!state.journal.length) return "";
+  const pp = computePassport(state.journal);
+  const stamps = pp.countries
+    .map(
+      (c, i) => `
+      <div class="stamp" style="--tilt:${i % 2 ? 2.5 : -2.5}deg">
+        <span class="stamp-flag">${COUNTRY_FLAGS[c.country] || "🌍"}</span>
+        <span class="stamp-name">${escapeHtml(c.country)}</span>
+        <span class="stamp-sub">${c.cities.size} ${c.cities.size === 1 ? "city" : "cities"}</span>
+      </div>`
+    )
+    .join("");
+  return `
+    <div class="passport">
+      <div class="detail-label">Travel passport</div>
+      ${pp.persona ? `<div class="passport-persona">${escapeHtml(pp.persona)}</div>` : ""}
+      <div class="stat-row">
+        <div class="stat-tile"><strong>${pp.trips}</strong><span>trips</span></div>
+        <div class="stat-tile"><strong>${pp.cityCount}</strong><span>cities</span></div>
+        <div class="stat-tile"><strong>${pp.countries.length}</strong><span>countries</span></div>
+        <div class="stat-tile"><strong>${pp.avgScore}%</strong><span>avg fit</span></div>
+      </div>
+      ${stamps ? `<div class="stamp-row">${stamps}</div>` : ""}
+      <button type="button" class="pill-btn" data-share-passport>Share my passport</button>
+    </div>`;
+}
+
+function buildPassportCanvas(pp) {
+  const W = 1080;
+  const H = 1920;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const font = (weight, size) => `${weight} ${size}px "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#eaf4ec");
+  bg.addColorStop(1, "#ffffff");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  drawShareLogo(ctx, 90, 115, 64);
+  ctx.fillStyle = "#1c1b19";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = font(700, 48);
+  ctx.fillText("Travelify", 170, 147);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#7a756c";
+  ctx.font = font(600, 40);
+  ctx.fillText("MY TRAVEL PASSPORT", W / 2, 420);
+
+  if (pp.persona) {
+    ctx.fillStyle = "#1c1b19";
+    ctx.font = font(800, 92);
+    wrapCenteredText(ctx, pp.persona, W / 2, 540, 900, 104, 2);
+  }
+
+  const stats = [
+    [pp.trips, "trips"],
+    [pp.cityCount, "cities"],
+    [pp.countries.length, "countries"],
+  ];
+  stats.forEach(([num, label], i) => {
+    const x = W * (0.2 + i * 0.3);
+    ctx.fillStyle = LOGO_GREEN;
+    ctx.font = font(800, 130);
+    ctx.fillText(String(num), x, 840);
+    ctx.fillStyle = "#7a756c";
+    ctx.font = font(500, 36);
+    ctx.fillText(label, x, 895);
+  });
+
+  const shown = pp.countries.slice(0, 12);
+  const cols = 4;
+  const colW = 240;
+  const startX = (W - cols * colW) / 2 + colW / 2;
+  shown.forEach((c, i) => {
+    const x = startX + (i % cols) * colW;
+    const y = 980 + Math.floor(i / cols) * 230;
+    ctx.fillStyle = "#1c1b19";
+    ctx.font = font(400, 130);
+    ctx.fillText(COUNTRY_FLAGS[c.country] || "🌍", x, y + 110);
+    ctx.fillStyle = "#7a756c";
+    ctx.font = font(600, 34);
+    ctx.fillText(c.country, x, y + 165);
+  });
+  if (pp.countries.length > shown.length) {
+    ctx.fillStyle = "#7a756c";
+    ctx.font = font(600, 36);
+    ctx.fillText(`+${pp.countries.length - shown.length} more`, W / 2, 1700);
+  }
+
+  ctx.strokeStyle = "#e7e2da";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(90, H - 160);
+  ctx.lineTo(W - 90, H - 160);
+  ctx.stroke();
+  ctx.fillStyle = "#7a756c";
+  ctx.font = font(500, 34);
+  ctx.fillText("Build your own passport at Travelify", W / 2, H - 90);
+  return canvas;
+}
+
+function openPassportShare() {
+  const pp = computePassport(state.journal);
+  openCanvasShareModal(buildPassportCanvas(pp), {
+    altText: "My Travelify travel passport",
+    filename: "travelify-passport.png",
+    shareText: `${pp.countries.length} countries, ${pp.cityCount} cities on Travelify${pp.persona ? " — I'm " + pp.persona : ""}!`,
+  });
+}
+
+// Saved hotels (kept on this device).
+const SAVED_KEY = "hotelify_saved_v1";
+let savedHotels = loadSavedHotels();
+
+function loadSavedHotels() {
+  try {
+    const list = JSON.parse(localStorage.getItem(SAVED_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistSavedHotels() {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(savedHotels));
+  } catch (e) {
+    // storage unavailable — saves just won't persist
+  }
+}
+
+function isHotelSaved(hotel) {
+  return !!hotel && savedHotels.some((s) => s.id === String(hotel.id));
+}
+
+function toggleSavedHotel() {
+  if (!selectedHotel) return;
+  const id = String(selectedHotel.id);
+  const i = savedHotels.findIndex((s) => s.id === id);
+  if (i !== -1) savedHotels.splice(i, 1);
+  else savedHotels.unshift({ id, name: selectedHotel.name, city: selectedHotel.city, themeKey: selectedTheme, savedAt: Date.now() });
+  persistSavedHotels();
+  render();
+}
+
+function removeSavedHotel(i) {
+  savedHotels.splice(i, 1);
+  persistSavedHotels();
+  render();
+}
+
+function openSavedHotel(i) {
+  const s = savedHotels[i];
+  if (!s) return;
+  const hotel = MOCK_HOTELS.find((h) => h.id === s.id) || { id: s.id, name: s.name, city: s.city, tags: [] };
+  selectedCity = s.city;
+  selectedTheme = s.themeKey && THEME_META[s.themeKey] ? s.themeKey : selectedTheme || "relaxation";
+  chooseHotel(hotel, { record: false });
+  window.scrollTo(0, 0);
+}
+
+function renderSavedSection() {
+  if (!savedHotels.length) return "";
+  const rows = savedHotels
+    .map((s, i) => {
+      const theme = THEME_META[s.themeKey];
+      return `
+      <li class="saved-row">
+        <button class="rank-row" data-open-saved="${i}">
+          <div class="rank-info">
+            <div class="rank-name">${escapeHtml(s.name)}</div>
+            <div class="rank-sub">${escapeHtml(s.city)}${theme ? " · " + theme.label : ""}</div>
+          </div>
+        </button>
+        <button type="button" class="icon-btn" data-remove-saved="${i}" title="Remove from saved">Remove</button>
+      </li>`;
+    })
+    .join("");
+  return `
+    <div class="saved-section">
+      <div class="detail-label">Saved hotels</div>
+      <ul class="rank-list">${rows}</ul>
+    </div>`;
+}
+
+// One tap to see a day's route in Google Maps, starting from the hotel.
+function dayRouteUrl(stops, hotel) {
+  const list = stops.slice(0, 10).map((n) => `${n}, ${hotel.city}`);
+  const params = new URLSearchParams({ api: "1", origin: `${hotel.name}, ${hotel.city}`, destination: list[list.length - 1] });
+  if (list.length > 1) params.set("waypoints", list.slice(0, -1).join("|"));
+  if (planTransport === "transit") params.set("travelmode", "transit");
+  else if (planTransport === "taxi") params.set("travelmode", "driving");
+  return "https://www.google.com/maps/dir/?" + params.toString();
+}
+
+// Community plans are shared as "Day N: a -> b" lines; turn them back into stops.
+function parseSharedPlanDays(text) {
+  const days = [];
+  for (const line of String(text || "").split("\n")) {
+    const m = line.match(/^Day (\d+): (.*)$/);
+    if (!m) {
+      if (days.length) break;
+      continue;
+    }
+    days.push(m[2].trim() === "(no stops added)" ? [] : m[2].split(" -> ").map((x) => x.trim()).filter(Boolean));
+  }
+  return days;
+}
+
+function useSharedPlan(planId) {
+  const p = [...communityPlans, ...ranking.plans].find((x) => x.id === planId);
+  if (!p) return;
+  const days = parseSharedPlanDays(p.plan_text);
+  if (!days.some((d) => d.length)) return;
+  if (planCheckDays.some((d) => d.length) && !window.confirm("Replace your current plan with this one?")) return;
+  const hotel = MOCK_HOTELS.find((h) => h.name === p.hotel_name && h.city === p.city) || { id: makeCustomId(), name: p.hotel_name, city: p.city, tags: [] };
+  selectedCity = p.city;
+  selectedTheme = THEME_META[p.theme_key] ? p.theme_key : "relaxation";
+  chooseHotel(hotel, { record: false });
+  planCheckDays = days;
+  planCheckResult = null;
+  planCheckError = null;
+  planCheckNotes = "";
+  answerTab = "plan";
+  render();
+  window.scrollTo(0, 0);
+}
+
 // ---------- journal ----------
 
 function recordTripMatch(entry) {
@@ -1153,6 +1448,8 @@ const ICON_PATHS = {
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
   feed: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  map: '<path d="M14.1 5.55a2 2 0 0 0 1.8 0l3.66-1.83A1 1 0 0 1 21 4.62v12.76a1 1 0 0 1-.55.9l-4.55 2.28a2 2 0 0 1-1.79 0l-4.21-2.1a2 2 0 0 0-1.79 0l-3.66 1.83A1 1 0 0 1 3 19.38V6.62a1 1 0 0 1 .55-.9l4.55-2.28a2 2 0 0 1 1.79 0z"/><path d="M15 5.76v15"/><path d="M9 3.24v15"/>',
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/>',
 };
 
@@ -1240,6 +1537,7 @@ function planCardHtml(p, rank) {
           <button type="button" class="engage-btn ${v.mine === 1 ? "engage-active-up" : ""}" data-vote="${p.id}|1">👍 ${v.up}</button>
           <button type="button" class="engage-btn ${v.mine === -1 ? "engage-active-down" : ""}" data-vote="${p.id}|-1">👎 ${v.down}</button>
           <button type="button" class="engage-btn" data-toggle-comments="${p.id}">💬 ${comments.length}</button>
+          ${parseSharedPlanDays(p.plan_text).some((d) => d.length) ? `<button type="button" class="engage-btn use-plan-btn" data-use-plan="${p.id}">Use this plan</button>` : ""}
         </div>
         ${commentBox}
       </li>`;
@@ -1503,6 +1801,7 @@ function renderAnswerStep() {
         <div class="answer-verdict">${fit.verdict}</div>
         <div class="rank-sub">${theme.emoji} ${theme.label} trip at ${escapeHtml(hotel.name)}</div>
       </div>
+      <button type="button" class="save-btn ${isHotelSaved(hotel) ? "saved" : ""}" data-save-hotel aria-pressed="${isHotelSaved(hotel)}" title="${isHotelSaved(hotel) ? "Remove from saved" : "Save this hotel"}">${icon("heart")}</button>
     </div>
 
     <div class="tabs">
@@ -1637,6 +1936,7 @@ function renderPlanCheckSection() {
         <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
         ${stops.length ? rows : `<p class="rank-sub">No stops added yet.</p>`}
         ${orderRow}
+        ${stops.length ? `<a class="route-link" href="${dayRouteUrl(stops, selectedHotel)}" target="_blank" rel="noopener">${icon("map")} Open Day ${i + 1} route in Maps</a>` : ""}
         <div class="plan-row">
           <div class="plan-col">
             ${quickAddChips(i, stops)}
@@ -2000,10 +2300,13 @@ function renderJournalPrivacy() {
 function renderJournal() {
   const badgesSection = renderBadgesSection();
   const privacy = renderJournalPrivacy();
+  const passport = renderPassportSection();
+  const saved = renderSavedSection();
   if (state.journal.length === 0) {
     return `
       <h2 class="step-heading">Your Trip Journal</h2>
       ${privacy}
+      ${saved}
       ${badgesSection}
       <div class="empty">No trips planned yet. Match your first hotel to start your journal.</div>
     `;
@@ -2027,6 +2330,8 @@ function renderJournal() {
     <h2 class="step-heading">Your Trip Journal</h2>
     <p class="rank-sub">Tap a trip to open it again.</p>
     ${privacy}
+    ${passport}
+    ${saved}
     ${badgesSection}
     <ul class="rank-list">${rows}</ul>
   `;
@@ -2045,6 +2350,20 @@ function bindEvents() {
       chooseHotel(hotel, { record: false });
       window.scrollTo(0, 0);
     });
+  });
+
+  const sharePassportBtn = root.querySelector("[data-share-passport]");
+  if (sharePassportBtn) sharePassportBtn.addEventListener("click", openPassportShare);
+  const saveHotelBtn = root.querySelector("[data-save-hotel]");
+  if (saveHotelBtn) saveHotelBtn.addEventListener("click", toggleSavedHotel);
+  root.querySelectorAll("[data-open-saved]").forEach((btn) => {
+    btn.addEventListener("click", () => openSavedHotel(Number(btn.dataset.openSaved)));
+  });
+  root.querySelectorAll("[data-remove-saved]").forEach((btn) => {
+    btn.addEventListener("click", () => removeSavedHotel(Number(btn.dataset.removeSaved)));
+  });
+  root.querySelectorAll("[data-use-plan]").forEach((btn) => {
+    btn.addEventListener("click", () => useSharedPlan(btn.dataset.usePlan));
   });
 
   root.querySelectorAll("[data-follow]").forEach((btn) => {
