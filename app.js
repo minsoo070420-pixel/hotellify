@@ -78,6 +78,8 @@ let planCheckError = null;
 let planCheckResult = null;
 // How the traveler wants to get between stops: "auto" | "transit" | "taxi".
 let planTransport = "auto";
+// How many people the budget is for (client-side multiplier, 1-8).
+let planTravelers = 1;
 
 // ---------- accounts (Supabase) ----------
 // Falls back to the existing guest/localStorage journal untouched when
@@ -422,7 +424,7 @@ async function evaluateCustomItinerary(hotel, themeKey, days) {
       ? "The traveler prefers taxi/rideshare for any leg too far to walk. Assume taxi times and fares. EXCEPTION: in New York City (and other cities where the subway or metro is clearly faster, such as Washington DC, London, Paris, Tokyo), do NOT recommend a taxi — traffic makes it slow and costly. For those legs, say the subway/metro is faster and cheaper, give its time and cost instead, and mark the leg \"review\"."
       : "No preference: pick the most sensible mode per leg for this city (see guidance above).";
   const prompt = `You are a practical, concise travel-logistics reviewer, not a trip planner. A traveler staying at ${hotel.name} in ${hotel.city}${hotel.country ? ", " + hotel.country : ""} on a ${theme.label}-themed trip has drafted this day-by-day list of places they want to visit, in the order listed:\n${dayLines}\n\nGive feedback on EVERY stop and on EVERY leg between consecutive stops (a leg is the trip from one stop to the next, in order).\n- For each stop: a verdict, a short feedback line, and 1-3 keywords describing it (pick from words like luxurious, fun, budget-friendly, romantic, historic, scenic, relaxing, foodie, cultural, active, shopping, nightlife, family-friendly, touristy, crowded — or another short fitting word).\n- For each leg: a verdict and feedback covering distance, the best way to get between the two stops, and likely traffic. Do NOT default to taxi. Pick the most sensible mode for THIS city and distance: walking for nearby stops; public transit (subway, metro, bus, train) in cities where it's fast, reliable and safe for visitors, such as New York, Washington DC, London, Paris, Tokyo, Singapore, Hong Kong, Berlin, Boston, Chicago; and rideshare/taxi/driving only where transit is poor, slow, or has real safety concerns for visitors, such as Los Angeles. When both transit and a car are reasonable, mention both briefly with rough times. Name the specific line or mode when you know it. Never recommend a taxi or rideshare in New York City. TRANSPORT PREFERENCE: ${transportRule}\n- Also for each leg give "mode" (the ONE mode you assumed: walk, subway, bus, train, taxi or car), "minutes" (realistic door-to-door travel time as a number) and "cost" (rough per-person cost in USD as a short string such as "$3" or "$14"; use "free" for walking).\n- For each day, also judge the ORDER of its stops. If a different order would cut backtracking, walking or traffic, or suit time of day (e.g. morning-only markets or museums first, sunset viewpoints and nightlife last), set "betterOrder" to the SAME stop names, spelled exactly as given, in the better sequence, and "orderNote" to a short reason (under 25 words). If the current order already works, set "betterOrder" to null and "orderNote" to a very short confirmation. Never add, drop or rename stops in betterOrder.
-- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the transport described above for far-apart ones (rough estimates). Also give the day's total travel time ("travelMinutes", number, all legs combined) and total transport cost ("travelCost", short USD string such as "$9" or "free").\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."]}],"legs":[{"verdict":"good" or "review","feedback":"...","mode":"walk|subway|bus|train|taxi|car","minutes":number,"cost":"$3"}],"betterOrder":["stop names"] or null,"orderNote":"...","walkingKm":number,"kcal":number,"travelMinutes":number,"travelCost":"$9"}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number,"totalTravelCost":"$27"}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
+- For each day: estimated total walking distance (km) and calories burned (kcal) for an average adult, assuming they walk between nearby stops and use the transport described above for far-apart ones (rough estimates). Also give the day's total travel time ("travelMinutes", number, all legs combined) and total transport cost ("travelCost", short USD string such as "$9" or "free").\n- Budget (USD, per person, typical prices for this city): for each STOP give "costUsd" (admission or ticket price, or a typical meal if the stop is a restaurant, cafe or bar; 0 if free). For each day give "foodUsd" (typical cost of the rest of that day's meals, snacks and drinks NOT already counted in a restaurant stop). At the top level give "hotelNightlyUsd" (typical nightly rate for one double room at ${hotel.name}${hotel.tier && TIER_META[hotel.tier] ? ", a " + TIER_META[hotel.tier].label.toLowerCase() + " hotel" : ""}).\n- Food: for each day suggest 2 real, well-established restaurants or cafes near that day's stops (roughly one for lunch and one for dinner, matching the ${theme.label} vibe) in "restaurants". Each has "name", "meal" (breakfast, lunch, dinner or snack), "cuisine", "mood" (1-2 words such as cozy, lively, romantic, casual, upscale, family-friendly) and "costUsd" (typical cost per person in USD). Only name places you are confident really exist; never invent one, and don't repeat a stop already in the plan. Use an empty array if unsure.\n\nKeep feedback SHORT (under 15 words) when something is fine. Use up to ~40 words only when a change is needed, and say specifically what to change (reorder, drop, split the day, switch transport mode). Don't invent problems.\n\nRespond with ONLY a JSON object of exactly this shape. "days" has one entry per day in order (${days.length} total); each day's "stops" has one entry per stop in order, and "legs" has one entry per consecutive pair (stops minus one; empty array if 0 or 1 stops):\n{"days":[{"stops":[{"verdict":"good" or "review","feedback":"...","keywords":["..."],"costUsd":number}],"legs":[{"verdict":"good" or "review","feedback":"...","mode":"walk|subway|bus|train|taxi|car","minutes":number,"cost":"$3"}],"betterOrder":["stop names"] or null,"orderNote":"...","walkingKm":number,"kcal":number,"travelMinutes":number,"travelCost":"$9","foodUsd":number,"restaurants":[{"name":"...","meal":"lunch","cuisine":"...","mood":"cozy","costUsd":number}]}],"summary":"1-2 sentence overall take","keywords":["2-4 keywords describing the whole plan"],"totalKcal":number,"totalTravelCost":"$27","hotelNightlyUsd":number}\nUse "good" when it works as written and "review" when it's worth looking at again.`;
   const text = await callGemini(prompt, { json: true });
   try {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -822,7 +824,7 @@ function saveSession() {
   try {
     localStorage.setItem(
       SESSION_KEY,
-      JSON.stringify({ selectedCity, selectedTheme, selectedHotel, step: ["city", "theme", "hotel", "answer"].includes(step) ? step : planStep(), answerTab, planCheckDays, planCheckNotes, planCheckResult, planTransport })
+      JSON.stringify({ selectedCity, selectedTheme, selectedHotel, step: ["city", "theme", "hotel", "answer"].includes(step) ? step : planStep(), answerTab, planCheckDays, planCheckNotes, planCheckResult, planTransport, planTravelers })
     );
   } catch (e) {
     // storage unavailable — progress just won't persist
@@ -841,6 +843,7 @@ function restoreSession() {
     planCheckNotes = saved.planCheckNotes || "";
     planCheckResult = saved.planCheckResult || null;
     planTransport = ["auto", "transit", "taxi"].includes(saved.planTransport) ? saved.planTransport : "auto";
+    planTravelers = Math.min(8, Math.max(1, Number(saved.planTravelers) || 1));
     step = planStep();
   } catch (e) {
     // ignore a corrupt saved session
@@ -1083,6 +1086,51 @@ function planNewTrip() {
   render();
 }
 
+// Rough trip budget from the AI's per-stop, per-day and hotel estimates.
+// Hotel cost is per room (one room per two travelers); everything else is per person.
+function parseMoney(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const text = String(v == null ? "" : v).toLowerCase();
+  if (!text || text.includes("free")) return 0;
+  const nums = (text.match(/\d+(?:[.,]\d+)?/g) || []).map((n) => parseFloat(n.replace(",", ".")));
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+}
+
+function computeBudget(result, nDays, travelers) {
+  const totals = { activities: 0, food: 0, transport: 0 };
+  const perDay = [];
+  (result.days || []).forEach((d) => {
+    const activities = (d.stops || []).reduce((t, st) => t + parseMoney(st && st.costUsd), 0);
+    const food = parseMoney(d.foodUsd);
+    let transport = (d.legs || []).reduce((t, l) => t + parseMoney(l && l.cost), 0);
+    if (!transport) transport = parseMoney(d.travelCost);
+    totals.activities += activities;
+    totals.food += food;
+    totals.transport += transport;
+    perDay.push(Math.round((activities + food + transport) * travelers));
+  });
+  const nightly = parseMoney(result.hotelNightlyUsd);
+  const nights = Math.max(1, nDays);
+  const rooms = Math.ceil(travelers / 2);
+  const hotel = nightly * nights * rooms;
+  const activities = totals.activities * travelers;
+  const food = totals.food * travelers;
+  const transport = totals.transport * travelers;
+  const total = hotel + activities + food + transport;
+  return {
+    nightly: Math.round(nightly),
+    nights,
+    rooms,
+    hotel: Math.round(hotel),
+    activities: Math.round(activities),
+    food: Math.round(food),
+    transport: Math.round(transport),
+    total: Math.round(total),
+    perDayAvg: Math.round(total / nights),
+    perDay,
+  };
+}
+
 function formatPlanCheckForSharing() {
   const dayLines = planCheckDays
     .map((stops, i) => `Day ${i + 1}: ${stops.length ? stops.join(" -> ") : "(no stops added)"}`)
@@ -1109,6 +1157,10 @@ function formatPlanCheckForSharing() {
     if (planCheckResult.keywords && planCheckResult.keywords.length) aiCheck += `\nPlan vibe: ${planCheckResult.keywords.join(", ")}`;
     if (planCheckResult.summary) aiCheck += `\n${planCheckResult.summary}`;
     if (planCheckResult.totalKcal) aiCheck += `\nTotal: ~${planCheckResult.totalKcal} kcal`;
+    if (planCheckResult.hotelNightlyUsd) {
+      const b = computeBudget(planCheckResult, planCheckDays.length, 1);
+      aiCheck += `\nEst. budget: ~$${b.total} per person for ${b.nights} night${b.nights > 1 ? "s" : ""} incl. hotel (rough estimate)`;
+    }
   }
   let text = dayLines;
   if (notes) text += `\n\nNotes: ${notes}`;
@@ -1845,9 +1897,16 @@ function renderPlanCheckSection() {
   const keywordChips = (kws) =>
     kws && kws.length ? `<div class="kw-row">${kws.map((k) => `<span class="kw-chip">${escapeHtml(String(k))}</span>`).join("")}</div>` : "";
 
+  const stopCost = (st) => {
+    if (st.costUsd === undefined || st.costUsd === null) return "";
+    const n = Math.round(parseMoney(st.costUsd));
+    return `<div class="leg-meta">${n > 0 ? "~$" + n + " per person" : "Free"}</div>`;
+  };
+
   const stopFeedback = (st) =>
     st
       ? `<div class="feedback-card ${verdictClass(st.verdict)}">
+          ${stopCost(st)}
           <div class="feedback-text">${st.verdict === "good" ? "✅" : "⚠️"} ${escapeHtml(st.feedback || "")}</div>
           ${keywordChips(st.keywords)}
         </div>`
@@ -1875,6 +1934,34 @@ function renderPlanCheckSection() {
         ? ""
         : `<label class="photo-add">${icon("camera")}<span>${photos.length ? "Add" : "Add photos"}</span><input type="file" accept="image/*" multiple hidden data-photo-input="${i}|${si}" /></label>`;
     return `<div class="photo-strip">${thumbs}${addBtn}</div>`;
+  };
+
+  const budget = structured ? computeBudget(structured, planCheckDays.length, planTravelers) : null;
+
+  const restoRow = (dr, stops, dayIndex) => {
+    const restos = dr && !planCheckLoading && Array.isArray(dr.restaurants) ? dr.restaurants.filter((r) => r && r.name) : [];
+    if (!restos.length) return "";
+    const inPlan = new Set(stops.map((x) => x.trim().toLowerCase()));
+    const cards = restos
+      .map((r, ri) => {
+        const cost = Math.round(parseMoney(r.costUsd));
+        const meta = [r.meal, r.cuisine, r.mood].filter(Boolean).map((x) => escapeHtml(String(x))).join(" · ");
+        const action = inPlan.has(String(r.name).trim().toLowerCase())
+          ? `<span class="rank-sub">In your plan</span>`
+          : `<button type="button" class="chip resto-add" data-add-resto="${dayIndex}|${ri}">+ Add to Day ${dayIndex + 1}</button>`;
+        return `
+        <div class="resto-card">
+          <div class="resto-main"><strong>${escapeHtml(String(r.name))}</strong>${cost > 0 ? `<span class="resto-cost">~$${cost} pp</span>` : ""}</div>
+          <div class="resto-meta">${meta}</div>
+          ${action}
+        </div>`;
+      })
+      .join("");
+    return `
+      <div class="plan-row">
+        <div class="plan-col plan-leg">Where to eat</div>
+        <div class="feedback-col">${cards}<p class="rank-sub">AI suggestions — check hours and prices before you go.</p></div>
+      </div>`;
   };
 
   const dayBlocks = planCheckDays
@@ -1910,7 +1997,7 @@ function renderPlanCheckSection() {
       const dayAnyReview = dr && [...(dr.stops || []), ...(dr.legs || [])].some((x) => x && x.verdict !== "good");
       const dayStats =
         dr && !planCheckLoading
-          ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal${dr.travelMinutes ? ` · ~${escapeHtml(String(dr.travelMinutes))} min getting around` : ""}${dr.travelCost ? ` · ${escapeHtml(String(dr.travelCost).startsWith("~") || String(dr.travelCost).toLowerCase() === "free" ? String(dr.travelCost) : "~" + String(dr.travelCost))} transport` : ""}</div></div>`
+          ? `<div class="feedback-card feedback-day ${dayAnyReview ? "feedback-review" : "feedback-good"}"><div class="feedback-stats">Day ${i + 1}: ~${escapeHtml(String(dr.walkingKm))} km walking · ~${escapeHtml(String(dr.kcal))} kcal${dr.travelMinutes ? ` · ~${escapeHtml(String(dr.travelMinutes))} min getting around` : ""}${dr.travelCost ? ` · ${escapeHtml(String(dr.travelCost).startsWith("~") || String(dr.travelCost).toLowerCase() === "free" ? String(dr.travelCost) : "~" + String(dr.travelCost))} transport` : ""}${budget && budget.perDay[i] > 0 ? ` · ~$${budget.perDay[i]} for the day` : ""}</div></div>`
           : "";
 
       let orderRow = "";
@@ -1936,6 +2023,7 @@ function renderPlanCheckSection() {
         <div class="plan-day-label">Day ${i + 1} ${removeBtn}</div>
         ${stops.length ? rows : `<p class="rank-sub">No stops added yet.</p>`}
         ${orderRow}
+        ${restoRow(dr, stops, i)}
         ${stops.length ? `<a class="route-link" href="${dayRouteUrl(stops, selectedHotel)}" target="_blank" rel="noopener">${icon("map")} Open Day ${i + 1} route in Maps</a>` : ""}
         <div class="plan-row">
           <div class="plan-col">
@@ -1965,6 +2053,33 @@ function renderPlanCheckSection() {
         ${structured.summary ? `<div>${escapeHtml(structured.summary)}</div>` : ""}
         ${structured.totalKcal ? `<div class="plan-summary-total">Total: ~${escapeHtml(String(structured.totalKcal))} kcal over ${planCheckDays.length} day${planCheckDays.length > 1 ? "s" : ""} (rough estimate)</div>` : ""}
         ${structured.totalTravelCost ? `<div class="plan-summary-total">Getting around: ~${escapeHtml(String(structured.totalTravelCost).replace(/^~/, ""))} total per person (rough estimate)</div>` : ""}
+      </div>`;
+  }
+
+  const staleHint =
+    structured && !planCheckLoading && planCheckDays.some((st, i) => ((structured.days[i] && structured.days[i].stops) || []).length !== st.length)
+      ? `<p class="rank-sub plan-error">You've added places since the last check — tap Check My Plan again to update the feedback and budget.</p>`
+      : "";
+
+  let budgetBlock = "";
+  if (budget && !planCheckLoading && budget.total > 0) {
+    const row = (label, note, amount) => `<div class="budget-row"><span>${label}${note ? ` <em>${note}</em>` : ""}</span><strong>$${amount}</strong></div>`;
+    budgetBlock = `
+      <div class="budget-card">
+        <div class="detail-label">Trip budget <em>rough estimate</em></div>
+        <div class="budget-travelers">
+          For
+          <button type="button" class="stepper-btn" data-travelers="-1" ${planTravelers <= 1 ? "disabled" : ""} aria-label="Fewer travelers">−</button>
+          <strong>${planTravelers}</strong>
+          <button type="button" class="stepper-btn" data-travelers="1" ${planTravelers >= 8 ? "disabled" : ""} aria-label="More travelers">+</button>
+          traveler${planTravelers > 1 ? "s" : ""}
+        </div>
+        ${budget.hotel > 0 ? row("Hotel", `${budget.nights} night${budget.nights > 1 ? "s" : ""} × ~$${budget.nightly}${budget.rooms > 1 ? " × " + budget.rooms + " rooms" : ""}`, budget.hotel) : ""}
+        ${row("Activities & entry", "", budget.activities)}
+        ${row("Food & drinks", "", budget.food)}
+        ${row("Getting around", "", budget.transport)}
+        <div class="budget-row budget-total"><span>Total <em>≈ $${budget.perDayAvg} per day</em></span><strong>$${budget.total}</strong></div>
+        <p class="rank-sub">Prices are typical USD estimates for this city, not live quotes. Nights = days planned.</p>
       </div>`;
   }
 
@@ -1998,6 +2113,8 @@ function renderPlanCheckSection() {
     <button type="button" class="pill-btn ghost" id="add-day-btn">+ Add Day</button>
     <button class="pill-btn" id="check-plan-btn" ${planCheckLoading || !hasAnyStops ? "disabled" : ""}>${planCheckLoading ? "Checking… (this can take a little while)" : "🔍 Check My Plan"}</button>
     ${resultBlock}
+    ${staleHint}
+    ${budgetBlock}
     ${shareBlock}
   </div>`;
 }
@@ -2495,6 +2612,21 @@ function bindEvents() {
 
   const checkPlanBtn = document.getElementById("check-plan-btn");
   if (checkPlanBtn) checkPlanBtn.addEventListener("click", checkMyPlan);
+
+  root.querySelectorAll("[data-add-resto]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [di, ri] = btn.dataset.addResto.split("|").map(Number);
+      const resto = planCheckResult && planCheckResult.days && planCheckResult.days[di] && (planCheckResult.days[di].restaurants || [])[ri];
+      if (resto && resto.name) addPlanCheckStop(di, String(resto.name));
+    });
+  });
+
+  root.querySelectorAll("[data-travelers]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      planTravelers = Math.min(8, Math.max(1, planTravelers + Number(btn.dataset.travelers)));
+      render();
+    });
+  });
 
   root.querySelectorAll("[data-transport]").forEach((btn) => {
     btn.addEventListener("click", () => {

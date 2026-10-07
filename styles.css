@@ -1283,3 +1283,85 @@ main {
   margin-left: auto;
   font-weight: 700;
 }
+
+/* Trip budget */
+.budget-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  margin: 14px 0;
+}
+.budget-card em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 4px;
+}
+.budget-travelers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin: 6px 0 10px;
+}
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.stepper-btn:disabled { opacity: 0.35; cursor: default; }
+.budget-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}
+.budget-total {
+  font-size: 16px;
+  font-weight: 800;
+  border-top: 2px solid var(--ink);
+}
+.budget-total strong { color: #2e7d4f; }
+
+/* Restaurant suggestions */
+.resto-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.resto-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+}
+.resto-cost {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2e7d4f;
+  white-space: nowrap;
+}
+.resto-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 6px;
+  text-transform: capitalize;
+}
+.resto-add { padding: 4px 10px; font-size: 12px; }
+@media (max-width: 700px) {
+  .resto-main { font-size: 13px; flex-wrap: wrap; }
+}
