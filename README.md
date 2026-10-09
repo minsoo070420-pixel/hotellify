@@ -49,24 +49,25 @@ To remove a saved key: "Change API key" on the answer screen, or clear `localSto
 
 ## Turning on the AI proxy (no more key prompts)
 
-By default each person pastes their own Gemini key, because a static site has nowhere safe to hide a shared one. To remove that step for everyone, the key can live on the server instead, in a Supabase Edge Function (`supabase/functions/gemini`). The browser then only ever talks to your Supabase project, and only signed-in users get through.
+By default each person pastes their own Gemini key, because a static site has nowhere safe to hide a shared one. To remove that step for everyone, the key can live on the server instead. The browser then only talks to your own server function, and only signed-in users get through. Two ways to host that function; pick one.
+
+**Option A: Vercel (`api/gemini.js`)**
 
 1. In the Supabase SQL Editor, run the **"AI proxy"** section at the end of `supabase/schema.sql` (it adds a per-user daily request budget).
-2. Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then in this folder:
+2. In Vercel: your project, then **Settings, Environment Variables**. Add `GEMINI_API_KEY` with a freshly created key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey), for Production (and Preview if you use it). Then **Redeploy**; variables only apply to new deployments.
+3. In `config.js`, set `AI_PROXY_ENABLED = true` and `AI_PROXY_URL = "/api/gemini"`, then commit and push.
 
-   ```bash
-   supabase login
-   supabase link --project-ref vmrjdyulamtubpvkaefo
-   supabase secrets set GEMINI_API_KEY=your-new-key
-   supabase functions deploy gemini
-   ```
+**Option B: Supabase Edge Function (`supabase/functions/gemini`)**
 
-   Type the key straight into your terminal — never into a file or a chat. Use a freshly created key, not one that has been pasted anywhere.
-3. In `config.js`, change `AI_PROXY_ENABLED` to `true` and redeploy the site.
+1. Run the same SQL section.
+2. With the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase login`, `supabase link --project-ref vmrjdyulamtubpvkaefo`, `supabase secrets set GEMINI_API_KEY=your-new-key`, `supabase functions deploy gemini`.
+3. In `config.js`, set `AI_PROXY_ENABLED = true` (leave `AI_PROXY_URL` empty).
 
-Optional secrets: `AI_DAILY_LIMIT` (requests per user per day, default 200 — one plan check can use several because the app races a few models) and `ALLOWED_ORIGINS` (comma-separated site URLs; default `*`).
+Never put the key in a file or a chat. Use a key that has never been pasted anywhere.
 
-With the switch off, nothing changes: the app asks for a personal key as before.
+Optional settings (Vercel environment variables, or Supabase secrets): `AI_DAILY_LIMIT` is requests per user per day, default 200 (one plan check can use several because the app races a few models); the Supabase option also accepts `ALLOWED_ORIGINS`.
+
+The Vercel function only works on the deployed site. On a local `python3 -m http.server` there is no `/api`, so keep `AI_PROXY_ENABLED = false` for local work and the app asks for a personal key as before.
 
 ## Why a journal, not a streak
 

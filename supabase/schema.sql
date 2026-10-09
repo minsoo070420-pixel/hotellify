@@ -212,3 +212,28 @@ $$;
 
 revoke all on function public.ai_use(uuid, int) from public, anon, authenticated;
 grant execute on function public.ai_use(uuid, int) to service_role;
+
+-- Used by the Vercel function (api/gemini.js), which counts usage under the
+-- caller's own login instead of a service-role key.
+create or replace function public.ai_use_self(p_limit int)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  used int;
+begin
+  if auth.uid() is null then
+    return false;
+  end if;
+  insert into public.ai_usage (user_id, day, count)
+  values (auth.uid(), current_date, 1)
+  on conflict (user_id, day) do update set count = public.ai_usage.count + 1
+  returning public.ai_usage.count into used;
+  return used <= p_limit;
+end;
+$$;
+
+revoke all on function public.ai_use_self(int) from public, anon;
+grant execute on function public.ai_use_self(int) to authenticated;

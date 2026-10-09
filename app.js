@@ -301,7 +301,8 @@ async function aiProxyCall(body) {
     err.status = 401;
     throw err;
   }
-  return fetch(`${SUPABASE_URL}/functions/v1/gemini`, {
+  const url = typeof AI_PROXY_URL === "string" && AI_PROXY_URL ? AI_PROXY_URL : `${SUPABASE_URL}/functions/v1/gemini`;
+  return fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
