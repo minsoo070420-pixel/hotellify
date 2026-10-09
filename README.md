@@ -47,6 +47,27 @@ This needs your own Gemini API key (free tier available at [aistudio.google.com/
 
 To remove a saved key: "Change API key" on the answer screen, or clear `localStorage` for this site.
 
+## Turning on the AI proxy (no more key prompts)
+
+By default each person pastes their own Gemini key, because a static site has nowhere safe to hide a shared one. To remove that step for everyone, the key can live on the server instead, in a Supabase Edge Function (`supabase/functions/gemini`). The browser then only ever talks to your Supabase project, and only signed-in users get through.
+
+1. In the Supabase SQL Editor, run the **"AI proxy"** section at the end of `supabase/schema.sql` (it adds a per-user daily request budget).
+2. Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then in this folder:
+
+   ```bash
+   supabase login
+   supabase link --project-ref vmrjdyulamtubpvkaefo
+   supabase secrets set GEMINI_API_KEY=your-new-key
+   supabase functions deploy gemini
+   ```
+
+   Type the key straight into your terminal — never into a file or a chat. Use a freshly created key, not one that has been pasted anywhere.
+3. In `config.js`, change `AI_PROXY_ENABLED` to `true` and redeploy the site.
+
+Optional secrets: `AI_DAILY_LIMIT` (requests per user per day, default 200 — one plan check can use several because the app races a few models) and `ALLOWED_ORIGINS` (comma-separated site URLs; default `*`).
+
+With the switch off, nothing changes: the app asks for a personal key as before.
+
 ## Why a journal, not a streak
 
 One mechanic is deliberately borrowed from why Beli got trendy with Gen Z, based on actual research rather than a vibe: Beli's edge over Yelp-style reviews is partly that it's a personal memory archive, not an anonymous rating — people build identity by stringing experiences into a story. Every match you generate here is saved to your **Trip Journal** (the "Journal" button in the header) so your trip history reads like a travel diary.

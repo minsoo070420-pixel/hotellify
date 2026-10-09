@@ -5,3 +5,9 @@
 // can read or write, not keeping this value hidden.
 const SUPABASE_URL = "https://vmrjdyulamtubpvkaefo.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZtcmpkeXVsYW10dWJwdmthZWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NjAxNjksImV4cCI6MjEwNjQzNjE2OX0.jyT9aSvAHRWMW897hBrg-anCe7XTyGUppk0eMDOs4Nk";
+
+// AI proxy switch. false = each person pastes their own Gemini key (stored in
+// their browser). true = the app calls the `gemini` Supabase Edge Function,
+// which holds the key as a server-side secret and only serves signed-in users.
+// Turn this on only after deploying the function (see README.md).
+const AI_PROXY_ENABLED = false;

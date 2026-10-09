@@ -287,6 +287,40 @@ function gettingThereUrls(h) {
 
 // ---------- Gemini trip planning ----------
 
+// When the AI proxy is on (config.js), requests go through a Supabase Edge
+// Function that holds the Gemini key; people only need to be signed in.
+function aiViaProxy() {
+  return isSupabaseConfigured() && typeof AI_PROXY_ENABLED !== "undefined" && AI_PROXY_ENABLED === true;
+}
+
+async function aiProxyCall(body) {
+  const { data } = await supabaseClient.auth.getSession();
+  const token = data && data.session ? data.session.access_token : null;
+  if (!token) {
+    const err = new Error("Sign in to use the AI features.");
+    err.status = 401;
+    throw err;
+  }
+  return fetch(`${SUPABASE_URL}/functions/v1/gemini`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+}
+
+// True when the AI can be used right now; otherwise opens the sign-in or
+// API-key dialog (and, for a key, runs onKeySaved afterwards).
+function ensureAiAccess(onKeySaved) {
+  if (aiViaProxy()) {
+    if (currentUser) return true;
+    openAuthModal("signin");
+    return false;
+  }
+  if (getGeminiKey()) return true;
+  openApiKeyModal(onKeySaved);
+  return false;
+}
+
 function getGeminiKey() {
   return localStorage.getItem(GEMINI_KEY_STORAGE) || "";
 }
@@ -317,7 +351,9 @@ function modelRank(name) {
 async function getCandidateModels(key) {
   if (discoveredModels) return discoveredModels;
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    const res = aiViaProxy()
+      ? await aiProxyCall({ action: "models" })
+      : await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
     if (res.ok) {
       const data = await res.json();
       const names = (data.models || [])
@@ -335,12 +371,13 @@ async function getCandidateModels(key) {
 
 // One request to one model. Rejects with err.status set on failure.
 async function requestModel(model, key, payload) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const res = aiViaProxy()
+    ? await aiProxyCall({ action: "generate", model, payload })
+    : await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     const err = new Error(body && body.error && body.error.message ? body.error.message : `Request failed (${res.status})`);
@@ -391,7 +428,7 @@ function raceModels(models, key, payload) {
 }
 
 async function callGemini(prompt, { json = false } = {}) {
-  const key = getGeminiKey();
+  const key = aiViaProxy() ? "" : getGeminiKey();
   const payload = { contents: [{ parts: [{ text: prompt }] }] };
   if (json) payload.generationConfig = { responseMimeType: "application/json" };
   const models = await getCandidateModels(key);
@@ -1357,10 +1394,7 @@ function currentSuggestions() {
 // Asks the AI for fresh places to visit around the hotel, skipping ones
 // already shown or already in the plan. Part of the plan-building tab.
 async function refreshSuggestions() {
-  if (!getGeminiKey()) {
-    openApiKeyModal(refreshSuggestions);
-    return;
-  }
+  if (!ensureAiAccess(refreshSuggestions)) return;
   currentSuggestions().forEach((n) => seenSuggestions.add(n.trim().toLowerCase()));
   planCheckDays.flat().forEach((n) => seenSuggestions.add(n.trim().toLowerCase()));
   suggestionsLoading = true;
@@ -1439,10 +1473,7 @@ function removePlanCheckDay(dayIndex) {
 }
 
 async function checkMyPlan() {
-  if (!getGeminiKey()) {
-    openApiKeyModal(checkMyPlan);
-    return;
-  }
+  if (!ensureAiAccess(checkMyPlan)) return;
   planCheckLoading = true;
   planCheckError = null;
   render();
@@ -2043,7 +2074,7 @@ function renderPlanCheckSection() {
   if (planCheckError) {
     resultBlock = `
       <p class="rank-sub plan-error">${escapeHtml(planCheckError)}</p>
-      <button class="icon-btn change-key-btn">Change API key</button>`;
+      ${aiViaProxy() ? "" : `<button class="icon-btn change-key-btn">Change API key</button>`}`;
   } else if (planCheckResult && planCheckResult.raw) {
     resultBlock = `<p class="rank-sub ai-plan-text">${escapeHtml(planCheckResult.raw)}</p>`;
   } else if (structured && !planCheckLoading) {
@@ -2146,18 +2177,18 @@ function openAuthModal(initialMode) {
       </div>
     `;
 
-    document.getElementById("auth-modal-close").addEventListener("click", () => overlay.remove());
-    document.getElementById("auth-switch-mode").addEventListener("click", (e) => {
+    overlay.querySelector("#auth-modal-close").addEventListener("click", () => overlay.remove());
+    overlay.querySelector("#auth-switch-mode").addEventListener("click", (e) => {
       e.preventDefault();
       mode = mode === "signin" ? "signup" : "signin";
       authError = null;
       paint();
     });
-    document.getElementById("auth-form").addEventListener("submit", async (e) => {
+    overlay.querySelector("#auth-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = document.getElementById("auth-email").value.trim();
-      const password = document.getElementById("auth-password").value;
-      const username = mode === "signup" ? document.getElementById("auth-username").value.trim() : null;
+      const email = overlay.querySelector("#auth-email").value.trim();
+      const password = overlay.querySelector("#auth-password").value;
+      const username = mode === "signup" ? overlay.querySelector("#auth-username").value.trim() : null;
       authLoading = true;
       authError = null;
       paint();
