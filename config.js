@@ -10,7 +10,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // their browser). true = the app calls the `gemini` Supabase Edge Function,
 // which holds the key as a server-side secret and only serves signed-in users.
 // Turn this on only after deploying the function (see README.md).
-const AI_PROXY_ENABLED = false;
+const AI_PROXY_ENABLED = true;
 // Where the app sends AI requests when the proxy is on. Leave empty to use the
 // Supabase Edge Function, or set to "/api/gemini" to use the Vercel function.
-const AI_PROXY_URL = "";
+const AI_PROXY_URL = "/api/gemini";
