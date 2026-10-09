@@ -2166,7 +2166,11 @@ function openAuthModal(initialMode) {
         <h3 class="step-heading">${mode === "signin" ? "Sign In" : "Create Account"}</h3>
         <form id="auth-form" class="custom-add" style="flex-direction:column; gap:10px;">
           ${mode === "signup" ? `<input id="auth-username" type="text" placeholder="Username" required autocomplete="username" />` : ""}
-          <input id="auth-email" type="email" placeholder="Email" required autocomplete="email" />
+          ${
+            mode === "signin"
+              ? `<input id="auth-email" type="text" placeholder="Email or username" required autocomplete="username" autocapitalize="none" spellcheck="false" />`
+              : `<input id="auth-email" type="email" placeholder="Email" required autocomplete="email" />`
+          }
           <input id="auth-password" type="password" placeholder="Password" required autocomplete="${mode === "signin" ? "current-password" : "new-password"}" minlength="6" />
           <button type="submit" class="pill-btn" ${authLoading ? "disabled" : ""}>${authLoading ? "Please wait…" : mode === "signin" ? "Sign In" : "Create Account"}</button>
         </form>
@@ -2197,7 +2201,7 @@ function openAuthModal(initialMode) {
         if (mode === "signup") {
           await signUp(email, password, username);
         } else {
-          await signIn(email, password);
+          await signInWithIdentifier(email, password);
         }
         authLoading = false;
         overlay.remove();

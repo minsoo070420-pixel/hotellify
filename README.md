@@ -69,6 +69,10 @@ Optional settings (Vercel environment variables, or Supabase secrets): `AI_DAILY
 
 The Vercel function only works on the deployed site. On a local `python3 -m http.server` there is no `/api`, so keep `AI_PROXY_ENABLED = false` for local work and the app asks for a personal key as before.
 
+## Signing in with a username
+
+The sign-in box accepts an email or a username. Emails go straight to Supabase. Usernames are looked up by `api/login.js` on the server (so nobody can turn a username into someone's email address). That function needs one more Vercel environment variable, `SUPABASE_SERVICE_ROLE_KEY` (Supabase: Project Settings, API, the `service_role` secret). It is powerful: keep it in Vercel only, never in a file, never in a chat. Without it, email sign-in still works and username sign-in shows a friendly message.
+
 ## Why a journal, not a streak
 
 One mechanic is deliberately borrowed from why Beli got trendy with Gen Z, based on actual research rather than a vibe: Beli's edge over Yelp-style reviews is partly that it's a personal memory archive, not an anonymous rating — people build identity by stringing experiences into a story. Every match you generate here is saved to your **Trip Journal** (the "Journal" button in the header) so your trip history reads like a travel diary.

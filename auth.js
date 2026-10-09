@@ -32,6 +32,28 @@ async function signIn(email, password) {
   return data;
 }
 
+// Accepts an email (handled directly by Supabase) or a username (resolved on
+// the server by api/login.js, which never reveals the email to the browser).
+async function signInWithIdentifier(identifier, password) {
+  const id = identifier.trim();
+  if (id.includes("@")) return signIn(id, password);
+  let res;
+  try {
+    res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: id, password }),
+    });
+  } catch (e) {
+    throw new Error("Couldn't reach the server. Try your email instead.");
+  }
+  if (res.status === 404) throw new Error("Username sign-in only works on the live site. Use your email here.");
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((body && body.error && body.error.message) || "Invalid login credentials");
+  const { error } = await supabaseClient.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
+  if (error) throw error;
+}
+
 async function signOut() {
   const { error } = await supabaseClient.auth.signOut();
   if (error) throw error;
